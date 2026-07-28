@@ -216,6 +216,9 @@ class WhoopConnectionService : Service() {
         // the link — the service would sit foregrounded and connectionless until the app was opened.
         reconnectSavedStrap()
 
+        // Same repair from the service: it outlives the app, so this covers days the user never opens it.
+        runCatching { com.noop.alarm.LucidRealityCheckScheduler.ensureScheduledForToday(this) }
+
         // Listen for the OS Bluetooth radio toggling so turning it off tears the link down at once (#314).
         // Guarded so repeat onStartCommands (every connect / OS restart) don't stack registrations.
         if (!bluetoothReceiverRegistered) {

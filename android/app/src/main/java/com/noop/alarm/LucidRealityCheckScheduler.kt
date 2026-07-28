@@ -88,6 +88,27 @@ object LucidRealityCheckScheduler {
             // Inexact and non-wakeup: a reality check must never punch through Doze to buzz someone.
             am.set(AlarmManager.RTC, at.timeInMillis, pendingIntent(context, i))
         }
+        // Record that a schedule now exists, so [ensureScheduledForToday] can tell "armed" from
+        // "silently never armed".
+        LucidPrefs.of(context).edit()
+            .putString(LucidPrefs.DAY_SCHEDULED_FOR, java.time.LocalDate.now().toString())
+            .apply()
+    }
+
+    /**
+     * Repair the schedule if today has none. Cheap and idempotent — call it from anywhere that runs
+     * regularly (app launch, the foreground service starting).
+     *
+     * Re-arming is otherwise driven ENTIRELY by the receiver, which only runs when an alarm fires. That
+     * is a chain with one failure point: if no alarm ever fires — the app is force-stopped, the OEM
+     * clears its alarms, or the process is killed — nothing re-arms itself and the feature stays silent
+     * until the user toggles it off and on. This makes the schedule self-healing instead.
+     */
+    fun ensureScheduledForToday(context: Context) {
+        if (!LucidPrefs.dayEnabled(context)) return
+        val today = java.time.LocalDate.now().toString()
+        if (LucidPrefs.of(context).getString(LucidPrefs.DAY_SCHEDULED_FOR, null) == today) return
+        schedule(context)
     }
 
     fun cancel(context: Context) {
@@ -149,17 +170,25 @@ class LucidRealityCheckReceiver : BroadcastReceiver() {
         )
         if (inWindow) runCatching {
             val app = context.applicationContext as com.noop.NoopApplication
-            app.ble.buzzLucidCue(bursts = 1)
             val prefs = LucidPrefs.of(context)
             val today = java.time.LocalDate.now().toString()
-            val fired = if (prefs.getString(LucidPrefs.DAY_KEY, null) == today) {
-                prefs.getInt(LucidPrefs.DAY_CUES_FIRED, 0)
+            val sameDay = prefs.getString(LucidPrefs.DAY_KEY, null) == today
+            val fired = if (sameDay) prefs.getInt(LucidPrefs.DAY_CUES_FIRED, 0) else 0
+            val skipped = if (sameDay) prefs.getInt(LucidPrefs.DAY_CUES_SKIPPED, 0) else 0
+
+            // The cue is a WRIST sensation or it is nothing. With no link the BLE write is silently
+            // dropped, so counting it as fired would report a cue the user never felt — which is
+            // exactly how a morning of "no buzzes" looked like a working schedule.
+            val connected = app.ble.state.value.connected
+            if (connected) {
+                app.ble.buzzLucidCue(bursts = 1)
             } else {
-                0
+                app.ble.externalLog("Lucid: reality check due, but no strap connected — skipped")
             }
             prefs.edit()
                 .putString(LucidPrefs.DAY_KEY, today)
-                .putInt(LucidPrefs.DAY_CUES_FIRED, fired + 1)
+                .putInt(LucidPrefs.DAY_CUES_FIRED, if (connected) fired + 1 else fired)
+                .putInt(LucidPrefs.DAY_CUES_SKIPPED, if (connected) skipped else skipped + 1)
                 .apply()
         }
         // Re-arm for the following day, so the schedule keeps rolling without the app being opened.

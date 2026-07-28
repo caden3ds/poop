@@ -63,6 +63,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Repair the lucid reality-check schedule if today has none. The schedule is otherwise only
+        // re-armed by its own receiver firing, so a day where nothing fired stayed silent forever.
+        runCatching { com.noop.alarm.LucidRealityCheckScheduler.ensureScheduledForToday(this) }
+
         // Only pre-warm permissions at launch for already-onboarded users. First-run onboarding
         // requests each permission at the step that explains it, Bluetooth when the Connect step
         // appears, notifications when it enables the background keep-alive, so the OS prompt never

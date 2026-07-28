@@ -42,6 +42,15 @@ object LucidPrefs {
     const val DAY_KEY = "lucid.dayKey"
     const val DAY_CUES_FIRED = "lucid.dayCuesFired"
 
+    /** Local date the reality-check ALARMS were last armed for. Distinct from [DAY_KEY], which counts
+     *  cues that fired: this records that a schedule exists at all, so a day where nothing ever fired
+     *  can be detected and repaired rather than staying silent. */
+    const val DAY_SCHEDULED_FOR = "lucid.dayScheduledFor"
+
+    /** Cues skipped because the strap was not connected. The buzz is the whole feature, so a skip is a
+     *  miss — counted separately so it can be surfaced instead of looking like a cue that happened. */
+    const val DAY_CUES_SKIPPED = "lucid.dayCuesSkipped"
+
     const val DEFAULT_DAY_CUES_PER_DAY = 4
     const val DEFAULT_DAY_START_MIN = 10 * 60   // 10:00
     const val DEFAULT_DAY_END_MIN = 21 * 60     // 21:00

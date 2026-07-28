@@ -122,6 +122,21 @@ class LucidRealityCheckSchedulerTest {
         assertFalse("nor one before the window opens", LucidRealityCheckScheduler.withinWindow(6 * 60, start, end))
     }
 
+    /**
+     * A window that opens LATER than now still yields its slots.
+     *
+     * The morning-silence report: with a 10:00 window start, nothing before 10:00 is a real cue, and a
+     * schedule that armed nothing would look identical to one that simply had no early slots. The picker
+     * must always hand back a full set for the window regardless of the current clock — placement in
+     * today-vs-tomorrow is the scheduler's job, not the picker's.
+     */
+    @Test
+    fun `slots are produced for the whole window, not just the part after now`() {
+        val times = LucidRealityCheckScheduler.pickTimes(10 * 60, 21 * 60, 4, seeded)
+        assertEquals(4, times.size)
+        assertTrue("the picker must be able to place slots early in the window", times.any { it < 13 * 60 })
+    }
+
     /** Randomness is the point: the same window must not always produce the same times. */
     @Test
     fun `different seeds give different schedules`() {
