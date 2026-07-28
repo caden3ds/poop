@@ -22,6 +22,16 @@ class SmartAlarmBootReceiver : BroadcastReceiver() {
                 runCatching {
                     SmartAlarmScheduler.rearmPersisted(context, SmartAlarmStore.from(context))
                 }
+                // Bring the connection service back after a reboot. Without this nothing background
+                // ran until the app was next opened by hand — no sleep detection, no smart alarm
+                // watch, no lucid cue — and the user's only clue was a missing notification.
+                runCatching {
+                    if (com.noop.ui.NoopPrefs.backgroundConnection(context)) {
+                        com.noop.ble.WhoopConnectionService.start(context)
+                    }
+                }
+                // Re-arm the daytime lucid reality checks: inexact alarms do not survive a reboot.
+                runCatching { LucidRealityCheckScheduler.schedule(context) }
                 // Re-schedule the (non-critical) wind-down nudge too — inexact repeating alarms are
                 // cleared by a reboot on many OEMs, so re-arm from the user's earliest wake time.
                 runCatching {

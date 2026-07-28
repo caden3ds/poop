@@ -211,6 +211,11 @@ class WhoopConnectionService : Service() {
             return START_NOT_STICKY
         }
 
+        // Reconnect on our own after an OS kill/restart. A resurrected service arrives with a null
+        // intent and a process that never ran the app's launch path, so nothing else would re-establish
+        // the link — the service would sit foregrounded and connectionless until the app was opened.
+        reconnectSavedStrap()
+
         // Listen for the OS Bluetooth radio toggling so turning it off tears the link down at once (#314).
         // Guarded so repeat onStartCommands (every connect / OS restart) don't stack registrations.
         if (!bluetoothReceiverRegistered) {
@@ -453,12 +458,35 @@ class WhoopConnectionService : Service() {
                 }
         }
 
-        // START_NOT_STICKY: the FGS's job is to keep this process *alive* (which it does while
-        // running, making OS kills unlikely). We deliberately do NOT resurrect after a kill, because
-        // a fresh process has no strap/model context to reconnect with — the user reopening the app
-        // re-establishes it. Resurrecting would only show a "Reconnecting…" notification that never
-        // resolves.
-        return START_NOT_STICKY
+        // START_STICKY: resurrect after an OS kill.
+        //
+        // This was START_NOT_STICKY, on the reasoning that a fresh process "has no strap/model context
+        // to reconnect with". That reasoning is stale — NoopPrefs.lastDevice persists the address AND
+        // the model, and [reconnectSavedStrap] below uses them. The practical effect of NOT_STICKY was
+        // that a single overnight kill ended the night: the notification vanished, nothing came back,
+        // and every background feature (sleep detection, the smart alarm, the lucid cue) was silently
+        // dead until the app was reopened by hand the next morning.
+        //
+        // A device that kills this aggressively will kill it again, so this is not a guarantee — but
+        // "Android may restart us" strictly beats "Android definitely will not".
+        return START_STICKY
+    }
+
+    /**
+     * Re-establish the link to the remembered strap when the service is running without one.
+     *
+     * Safe to call on every onStartCommand: it no-ops when already connected, when the user opted out
+     * of background connection, or when no strap is remembered. Mirrors the ViewModel's launch-time
+     * auto-reconnect, which a service resurrected by the OS never gets to run.
+     */
+    private fun reconnectSavedStrap() {
+        runCatching {
+            if (ble.state.value.connected) return
+            if (!NoopPrefs.backgroundConnection(this)) return
+            val saved = NoopPrefs.lastDevice(this) ?: return
+            ble.externalLog("FGS: restarted without a link — reconnecting to the saved strap")
+            ble.reconnectToAddress(saved.first, saved.second)
+        }
     }
 
     /** Promote to the foreground. Returns false (rather than throwing) if the platform refuses. When
