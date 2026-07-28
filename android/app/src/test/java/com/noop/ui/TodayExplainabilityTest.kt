@@ -248,7 +248,7 @@ class TodayExplainabilityTest {
 
     @Test
     fun perMetric_computedSibling_readsOnDevice() {
-        // The "$deviceId-noop" sibling is a score NOOP computed on THIS device from the raw strap stream.
+        // The "$deviceId-noop" sibling is a score POOP computed on THIS device from the raw strap stream.
         assertEquals("On-device", provenanceDisplayLabel("my-whoop-noop"))
     }
 
@@ -298,7 +298,7 @@ class TodayExplainabilityTest {
     @Test
     fun perMetric_crossStrapComputedSibling_stillReadsOnDevice() {
         // A "-noop" sibling banked under a DIFFERENT strap id (the user re-paired straps) is still a
-        // score NOOP computed on-device. The resolver matches the "-noop" suffix, not the exact
+        // score POOP computed on-device. The resolver matches the "-noop" suffix, not the exact
         // "$deviceId-noop" — otherwise these rows would fall through to the raw id verbatim.
         assertEquals("On-device", provenanceDisplayLabel("whoop5-C0FF-noop", deviceId = "my-whoop"))
         assertEquals("On-device", provenanceDisplayLabel("my-whoop-noop", deviceId = "strap-42"))

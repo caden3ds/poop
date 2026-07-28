@@ -229,6 +229,18 @@ object AnalyticsEngine {
         // flag. Default false keeps every pure-function caller/test byte-identical; IntelligenceEngine
         // threads PuffinExperiment.from(context).motionAwareWake. Mirrors Swift.
         useMotionAwareWake: Boolean = false,
+        // Manual-sleep-only mode: automatic sleep DETECTION is skipped entirely; the day's sleep comes
+        // exclusively from the user's own logged windows, supplied in [manualSleepWindows] and scored
+        // through the IDENTICAL per-session path a detected night takes
+        // ([SleepStager.scoreManualWindows]). Default false keeps every existing caller/test
+        // byte-identical. The Context-aware caller threads NoopPrefs.manualSleepOnly.
+        manualSleepOnly: Boolean = false,
+        // The user's logged sleep windows ([start, end] unix seconds) that belong to this day, used
+        // ONLY when [manualSleepOnly] is on. These MUST be scored here rather than folded in later:
+        // resting HR and HRV are derived from the day's matched sessions, and the downstream edit-fold
+        // (IntelligenceEngine.sleepEditedDaily) restores only duration + stages — so relying on it
+        // alone would leave `restingHr`/`avgHrv` null and silently kill HRV, RHR and Charge.
+        manualSleepWindows: List<Pair<Long, Long>> = emptyList(),
         // Sleep & Rest test-mode trace sink (E11). null = byte-identical default. When non-null the gate
         // trace from detectSleep and the Rest sub-score line are forwarded line-by-line. Mirrors Swift.
         traceSink: ((String) -> Unit)? = null,
@@ -248,7 +260,15 @@ object AnalyticsEngine {
     ): DayResult {
 
         // ── Sleep detection + staging ─────────────────────────────────────────
-        val detectedSessions = SleepStager.detectSleep(
+        // Manual-sleep-only: no automatic detection — the user's own logged windows ARE the night, and
+        // they are scored right here through the same per-session physiology (resting HR, HRV, staging,
+        // efficiency) a detected night gets, so every downstream aggregate behaves identically. This
+        // must NOT be left to the later edit-fold, which restores duration/stages only and would leave
+        // RHR + HRV (and therefore Charge) null. Skipping detectSleep also saves the heaviest pass.
+        val detectedSessions = if (manualSleepOnly) SleepStager.scoreManualWindows(
+            windows = manualSleepWindows, hr = hr, rr = rr, resp = resp, gravity = gravity,
+            useSleepStagerV2 = useSleepStagerV2,
+        ) else SleepStager.detectSleep(
             hr = hr, rr = rr, resp = resp, gravity = gravity, tzOffsetSeconds = tzOffsetSeconds,
             wristOff = wristOff, bandSleepState = bandSleepState,
             useSleepStagerV2 = useSleepStagerV2,
@@ -871,7 +891,7 @@ object AnalyticsEngine {
 }
 
 /*
- * RestScorer — NOOP "Rest" (sleep_performance) composite, 0–100.
+ * RestScorer — POOP "Rest" (sleep_performance) composite, 0–100.
  *
  * Faithful Kotlin mirror of the Swift Rest composite (AnalyticsEngine / RestScorer). Keep every
  * constant and the weight set byte-identical to Swift — parity tests enforce it.

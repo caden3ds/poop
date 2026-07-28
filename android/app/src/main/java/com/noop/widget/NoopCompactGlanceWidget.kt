@@ -4,7 +4,6 @@ import com.noop.ui.uiString
 import androidx.compose.ui.res.stringResource
 import android.content.Context
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.ColorFilter
@@ -41,17 +40,7 @@ class NoopCompactGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val snap = runCatching { WidgetSnapshotStore.load(context) }.getOrDefault(WidgetSnapshot())
-        val dark = runCatching {
-            when (context.getSharedPreferences("noop_prefs", Context.MODE_PRIVATE)
-                .getString("theme.appearance", "system")) {
-                "light" -> false
-                "dark" -> true
-                else -> (context.resources.configuration.uiMode and
-                    android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
-                    android.content.res.Configuration.UI_MODE_NIGHT_YES
-            }
-        }.getOrDefault(true)
-        provideContent { CompactWidgetContent(snap, dark) }
+        provideContent { CompactWidgetContent(snap) }
     }
 
     override fun onCompositionError(
@@ -67,34 +56,17 @@ class NoopCompactGlanceWidget : GlanceAppWidget() {
     }
 }
 
-private fun compactWidgetSurface(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFF0A1322) else Color(0xFFF4F1EA))
-private fun compactWidgetTextPrimary(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFFF4F6F8) else Color(0xFF1A2230))
-private fun compactWidgetTextSecondary(dark: Boolean) =
-    ColorProvider(if (dark) Color(0xFF8A94A4) else Color(0xFF7C8696))
-
-private fun compactBandColor(recovery: Int, dark: Boolean): ColorProvider = ColorProvider(
-    when {
-        recovery >= 67 -> if (dark) Color(0xFFE8B84B) else Color(0xFFB07D17)
-        recovery >= 34 -> if (dark) Color(0xFFD98A3D) else Color(0xFFC2792E)
-        else -> if (dark) Color(0xFFE0662F) else Color(0xFFC84E1E)
-    },
-)
-
-private fun compactEffortColor(dark: Boolean): ColorProvider =
-    ColorProvider(if (dark) Color(0xFF4FB6A8) else Color(0xFF2E7D74))
 
 @Composable
-private fun CompactWidgetContent(snap: WidgetSnapshot, dark: Boolean) {
-    val surface = compactWidgetSurface(dark)
-    val textPrimary = compactWidgetTextPrimary(dark)
-    val textSecondary = compactWidgetTextSecondary(dark)
+private fun CompactWidgetContent(snap: WidgetSnapshot) {
+    val surface = WidgetPalette.surface
+    val textPrimary = WidgetPalette.textPrimary
+    val textSecondary = WidgetPalette.textSecondary
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
             .background(surface)
-            .cornerRadius(16.dp)
+            .cornerRadius(WidgetMetrics.cornerRadius)
             .clickable(actionStartActivity<MainActivity>())
             .padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -109,21 +81,21 @@ private fun CompactWidgetContent(snap: WidgetSnapshot, dark: Boolean) {
                 label = uiString(R.string.l10n_noop_compact_glance_widget_rest_cbaaa181),
                 iconRes = R.drawable.ic_widget_rest,
                 pct = snap.restPct,
-                color = snap.restPct?.let { compactBandColor(it, dark) } ?: textSecondary,
+                color = snap.restPct?.let { WidgetPalette.band(it) } ?: textSecondary,
                 modifier = GlanceModifier.defaultWeight(),
             )
             CompactScoreCell(
                 label = uiString(R.string.l10n_noop_compact_glance_widget_charge_49a8cb83),
                 iconRes = R.drawable.ic_widget_charge,
                 pct = snap.recoveryPct,
-                color = snap.recoveryPct?.let { compactBandColor(it, dark) } ?: textSecondary,
+                color = snap.recoveryPct?.let { WidgetPalette.band(it) } ?: textSecondary,
                 modifier = GlanceModifier.defaultWeight(),
             )
             CompactScoreCell(
                 label = uiString(R.string.l10n_noop_compact_glance_widget_effort_660752e7),
                 iconRes = R.drawable.ic_widget_effort,
                 pct = snap.effortPct,
-                color = snap.effortPct?.let { compactEffortColor(dark) } ?: textSecondary,
+                color = snap.effortPct?.let { WidgetPalette.effort } ?: textSecondary,
                 modifier = GlanceModifier.defaultWeight(),
             )
         }
@@ -152,7 +124,7 @@ private fun CompactWidgetContent(snap: WidgetSnapshot, dark: Boolean) {
                 snap.connected -> "Connected"
                 snap.updatedAtMs > 0L ->
                     DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(snap.updatedAtMs))
-                else -> "Open NOOP to connect"
+                else -> "Open POOP to connect"
             },
             style = TextStyle(color = textSecondary, fontSize = 11.sp),
         )

@@ -35,6 +35,17 @@ internal data class ImportedSleepSeries(
 /** Everything the screen renders, derived once per data change. */
 internal data class SleepModel(
     val stages: Stages,
+    /**
+     * Asleep minutes for the night, preferring the night's own recorded total over the sum of the
+     * stage buckets.
+     *
+     * These can legitimately disagree: the stage buckets come from a per-day lookup that can miss (a
+     * manually-logged night whose DailyMetric stage columns were never filled, or a session whose
+     * end-day key doesn't match), while `totalSleepMin` is recorded directly. When that happened the
+     * hero read "0m asleep" over a timeline that was visibly showing stages. Anything reporting how
+     * long the user slept must use THIS, not `stages.asleep`.
+     */
+    val asleepMin: Double?,
     val clockLabel: String,
     val efficiencyText: String,
     val performance: Metric,

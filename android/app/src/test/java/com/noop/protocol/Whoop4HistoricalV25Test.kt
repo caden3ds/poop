@@ -7,7 +7,7 @@ import org.junit.Test
 import kotlin.math.sqrt
 
 /**
- * WHOOP 4.0 **v25** historical layout (issue #30) — the firmware layout NOOP couldn't decode ("no
+ * WHOOP 4.0 **v25** historical layout (issue #30) — the firmware layout POOP couldn't decode ("no
  * motion data, so sleep can't be computed"). Three REAL v25 records (faklei, App 1.92, 2026-06-11),
  * 84 bytes each. Layout RE'd from 45 such records: `unix` @11 (u32 LE) and the DSP gravity vector
  * @73/75/77 as 3×i16 LE / 16384 (|gravity| ≈ 1 g). Mirrors the Swift Whoop4HistoricalV25Tests.

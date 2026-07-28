@@ -40,7 +40,7 @@ import androidx.compose.ui.unit.dp
 //
 // A plain-English comparison of the WHOOP 4.0 and the WHOOP 5.0/MG, reached from Settings → Strap by
 // EITHER model owner. The point (issue #490): a 4.0 user wrongly believed broadcast-out was 5.0-only.
-// In truth NOOP's OWN heart-rate re-broadcast (Data Sources → "Broadcast heart rate") works on ANY
+// In truth POOP's OWN heart-rate re-broadcast (Data Sources → "Broadcast heart rate") works on ANY
 // strap — it re-advertises whatever live HR NOOP is reading. What's genuinely 5/MG-only is the strap
 // FIRMWARE broadcast flag (whoop_live_hr_in_adv_ind_pkt), because the 4.0 firmware has no such config.
 // This screen draws that line honestly, and reassures a 4.0 owner their strap is fully supported.
@@ -60,7 +60,7 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
     CapabilityRow(
         "Live heart rate",
         Support.YES, Support.YES,
-        "Both stream live HR to NOOP over Bluetooth.",
+        "Both stream live HR to POOP over Bluetooth.",
     ),
     CapabilityRow(
         "Sleep, recovery & strain history",
@@ -69,10 +69,10 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
             "deeper history is still being mapped.",
     ),
     CapabilityRow(
-        "NOOP re-broadcasts your HR (gym / Zwift / Garmin)",
+        "POOP re-broadcasts your HR (gym / Zwift / Garmin)",
         Support.YES, Support.YES,
         "Data Sources → \"Broadcast heart rate\" turns your PHONE into a standard BLE HR sensor using " +
-            "whatever HR NOOP is reading, so this works on a 4.0 too. It's local Bluetooth; nothing leaves " +
+            "whatever HR POOP is reading, so this works on a 4.0 too. It's local Bluetooth; nothing leaves " +
             "your phone.",
     ),
     CapabilityRow(
@@ -84,8 +84,8 @@ private val CAPABILITIES: List<CapabilityRow> = listOf(
     CapabilityRow(
         "Steps",
         Support.PARTIAL, Support.YES,
-        "A 4.0 sends no step count, so NOOP ESTIMATES steps from motion, calibrated to your phone " +
-            "(Settings → Profile → Steps estimate). A 5/MG reports a motion counter NOOP reads directly.",
+        "A 4.0 sends no step count, so POOP ESTIMATES steps from motion, calibrated to your phone " +
+            "(Settings → Profile → Steps estimate). A 5/MG reports a motion counter POOP reads directly.",
     ),
     CapabilityRow(
         "Rename the strap's Bluetooth name",

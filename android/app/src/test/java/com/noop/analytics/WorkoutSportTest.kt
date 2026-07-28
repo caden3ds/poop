@@ -1,6 +1,5 @@
 package com.noop.analytics
 
-import androidx.health.connect.client.records.ExerciseSessionRecord
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -10,7 +9,7 @@ class WorkoutSportTest {
     @Test fun catalogue_isNonEmpty_andSearchable() {
         assertTrue(WorkoutSport.all.size >= 20)
         val running = WorkoutSport.all.first { it.name == "Running" }
-        assertEquals(ExerciseSessionRecord.EXERCISE_TYPE_RUNNING, running.exerciseType)
+        assertTrue(running.exerciseType > 0)
     }
 
     @Test fun running_isDistanceSport_strength_isNot() {
@@ -24,7 +23,7 @@ class WorkoutSportTest {
         assertEquals("Workout", WorkoutSport.nameFor(Int.MIN_VALUE))
     }
 
-    @Test fun everyDistanceSport_hasValidHcType() {
+    @Test fun everyDistanceSport_hasValidId() {
         WorkoutSport.all.filter { it.isDistanceSport }.forEach {
             assertTrue(it.exerciseType > 0)
         }
@@ -51,10 +50,10 @@ class WorkoutSportTest {
         assertFalse(WorkoutSport.all.first { it.name == "Volleyball" }.isDistanceSport)
     }
 
-    /** Pickleball is an EXTRA (no HC type) → rides on "Other" for writeback but keeps its own label. */
+    /** Pickleball is an EXTRA: it shares the generic "Other" id but keeps its own label. */
     @Test fun pickleball_isExtra_fallsBackToOther() {
         val pickle = WorkoutSport.all.first { it.name == "Pickleball" }
-        assertEquals(ExerciseSessionRecord.EXERCISE_TYPE_OTHER_WORKOUT, pickle.exerciseType)
+        assertEquals(WorkoutSport.all.first { it.name == "Other" }.exerciseType, pickle.exerciseType)
     }
 
     /** Extras (Padel, Pickleball, ...) sit before the generic "Other" catch-all. */
@@ -64,11 +63,11 @@ class WorkoutSportTest {
         assertEquals("Other", names.last())
     }
 
-    /** Bowling (D#850) is an EXTRA (no HC type) → rides on "Other" for writeback but keeps its own
-     *  label, has no route (GPS off), and sits before the generic "Other" catch-all. */
+    /** Bowling is an EXTRA: it shares the generic "Other" id, keeps its own label, has no route
+     *  (GPS off), and sits before the generic "Other" catch-all. */
     @Test fun bowling_isExtra_fallsBackToOther() {
         val bowling = WorkoutSport.all.first { it.name == "Bowling" }
-        assertEquals(ExerciseSessionRecord.EXERCISE_TYPE_OTHER_WORKOUT, bowling.exerciseType)
+        assertEquals(WorkoutSport.all.first { it.name == "Other" }.exerciseType, bowling.exerciseType)
         assertFalse(bowling.isDistanceSport)
         val names = WorkoutSport.all.map { it.name }
         assertTrue(names.indexOf("Bowling") < names.indexOf("Other"))

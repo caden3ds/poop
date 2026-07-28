@@ -1148,6 +1148,67 @@ object SleepStager {
     }
 
     /** asleep / in-bed in [0, 1]; asleep = in-bed − wake. */
+    /**
+     * Score USER-DEFINED sleep windows exactly as if they had been detected — the manual-sleep-only
+     * path (the Sleep screen's "Going to sleep" / "I'm awake" marks define the night).
+     *
+     * WHY THIS EXISTS: [detectSleep]'s output is what feeds a day's resting HR and HRV
+     * ([AnalyticsEngine] computes `restingHr` / `avgHrv` from the matched sessions), and the
+     * edit-fold that re-adds a hand-logged night downstream only restores DURATION + STAGES. So a
+     * mode that suppressed detection and relied on that fold alone left both physiological figures
+     * permanently null — silently killing HRV, RHR and therefore Charge. Manual windows must go
+     * through the SAME per-session scoring instead of being folded in later.
+     *
+     * Deliberately reuses the identical primitives the detection loop uses — [sessionRestingHR],
+     * [sessionAvgHRV], [stageSession] / [SleepStagerV2.stageSession], [efficiency] — so a manually
+     * logged night and an auto-detected one of the same span produce byte-identical physiology. The
+     * ONLY difference is provenance: the window comes from the user rather than the gravity spine, so
+     * NONE of the acceptance gates (min-span, daytime guard, off-wrist, HR confirmation) apply — the
+     * user asserting "I slept here" is the authority in this mode, which is the whole point of it.
+     *
+     * Windows are clamped to sane order and de-duplicated by start; an inverted/empty window is
+     * dropped rather than scored. Pure: same inputs → same output, no I/O.
+     */
+    fun scoreManualWindows(
+        windows: List<Pair<Long, Long>>,
+        hr: List<HrSample> = emptyList(),
+        rr: List<RrInterval> = emptyList(),
+        resp: List<RespSample> = emptyList(),
+        gravity: List<GravitySample>,
+        useSleepStagerV2: Boolean = false,
+    ): List<DetectedSleep> {
+        if (windows.isEmpty()) return emptyList()
+        val grav = gravity.sortedBy { it.ts }
+        val hrS = hr.sortedBy { it.ts }
+        val rrS = rr.sortedBy { it.ts }
+        val respS = resp.sortedBy { it.ts }
+        val out = ArrayList<DetectedSleep>(windows.size)
+        val seenStarts = HashSet<Long>()
+        for ((rawStart, rawEnd) in windows.sortedBy { it.first }) {
+            if (rawEnd <= rawStart) continue           // inverted / zero-length: nothing to score
+            if (!seenStarts.add(rawStart)) continue    // same onset logged twice: keep the first
+            val stages = if (useSleepStagerV2) {
+                SleepStagerV2.stageSession(start = rawStart, end = rawEnd, grav = grav,
+                    hr = hrS, rr = rrS, resp = respS)
+            } else {
+                stageSession(start = rawStart, end = rawEnd, grav = grav,
+                    hr = hrS, rr = rrS, resp = respS)
+            }
+            out.add(
+                DetectedSleep(
+                    start = rawStart,
+                    end = rawEnd,
+                    efficiency = efficiency(start = rawStart, end = rawEnd, stages = stages),
+                    stages = stages,
+                    restingHR = sessionRestingHR(start = rawStart, end = rawEnd, hr = hrS),
+                    avgHRV = sessionAvgHRV(start = rawStart, end = rawEnd, rr = rrS),
+                )
+            )
+        }
+        out.sortBy { it.start }
+        return out
+    }
+
     internal fun efficiency(start: Long, end: Long, stages: List<StageSegment>): Double {
         val inBed = (end - start).toDouble()
         if (inBed <= 0) return 0.0

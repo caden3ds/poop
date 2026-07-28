@@ -49,7 +49,6 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         // Load the saved "Card transparency" so every frosted card renders at the chosen opacity from launch.
-        CardAppearance.init(this)
 
         // Demo build only: preload a full synthetic dataset so every screen is populated
         // out of the box (no strap, no import). No-op once seeded; never runs on the full app.
@@ -89,8 +88,6 @@ class MainActivity : ComponentActivity() {
 
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).
-        AppearancePrefs.load(this)
-        ChartStylePrefs.load(this)
         // Decode the optional on-device profile photo (if set) before first composition so the Today
         // header + Settings avatars show it from the first frame. No-op when no photo is set.
         ProfileAvatarStore.load(this)
@@ -173,7 +170,7 @@ object NoopPrefs {
     /** "Keep connected in the background", drives [com.noop.ble.WhoopConnectionService]. Default on. */
     const val KEY_BACKGROUND_CONNECTION = "noop.backgroundConnection"
 
-    /** "Continuous HRV capture", when on (AND background connection is on), NOOP holds the dense
+    /** "Continuous HRV capture", when on (AND background connection is on), POOP holds the dense
      *  realtime HR stream armed even with no Live screen open, so the strap banks beat-to-beat R-R 24/7
      *  for far better overnight HRV/recovery/sleep. Uses more battery (continuous HR streaming). Default
      *  OFF. Drives [com.noop.ble.WhoopBleClient.setKeepStreamForData] via [AppViewModel]. */
@@ -204,7 +201,7 @@ object NoopPrefs {
      *  "Share strap log" export) work regardless. See [com.noop.ble.WhoopBleClient.debugLogcat]. */
     const val KEY_DEBUG_LOGGING = "noop.debugLogging"
 
-    /** "Broadcast heart rate", when on, NOOP acts as a standard BLE Heart Rate peripheral (0x180D /
+    /** "Broadcast heart rate", when on, POOP acts as a standard BLE Heart Rate peripheral (0x180D /
      *  0x2A37) and re-broadcasts the live strap HR so a gym treadmill / Zwift / Peloton can read it.
      *  LOCAL Bluetooth only, nothing leaves the device. Default OFF. Drives [com.noop.ble.HrBroadcaster]
      *  via [AppViewModel]. Distinct from the WHOOP strap's own "broadcast HR" firmware config. */
@@ -212,14 +209,14 @@ object NoopPrefs {
 
     const val KEY_ANALYZE_WATERMARK = "noop.analyzeWatermark"
 
-    /** "Power saving" (#477): when on, NOOP stretches its periodic strap-sync cadence (15 → 45 min) while
+    /** "Power saving" (#477): when on, POOP stretches its periodic strap-sync cadence (15 → 45 min) while
      *  the phone is discharging at/below [KEY_POWER_SAVING_BATTERY_PCT] OR the OS Battery Saver is on.
      *  Benign — the strap banks to flash meanwhile, so sync just batches; no data loss, no link risk.
      *  Default OFF. Drives [com.noop.ble.WhoopBleClient.setLowBatteryOffloadThrottle] via [AppViewModel]. */
     const val KEY_POWER_SAVING = "noop.powerSaving"
     /** Battery-% threshold for [KEY_POWER_SAVING] (10/15/20/25/30). Default 20. */
     const val KEY_POWER_SAVING_BATTERY_PCT = "noop.powerSavingBatteryPct"
-    /** "Pause HRV capture in Battery Saver" (#477): when on, NOOP releases the held-open background
+    /** "Pause HRV capture in Battery Saver" (#477): when on, POOP releases the held-open background
      *  continuous-HRV stream while the OS Battery Saver is on (a Live screen still arms it on demand).
      *  A sub-option of [KEY_POWER_SAVING] — only effective while the master is on. Default ON (so enabling
      *  Power saving pauses capture by default; the user can turn it off). Drives
@@ -350,19 +347,6 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_BUZZ_WHOOP4_WITH_ALARM, enabled).apply()
     }
 
-    /** Launcher-icon preference (v3 "Titanium & Gold"). false = machined-titanium (.IconDefault,
-     *  the default); true = blued/dark-blue titanium (.IconNavy). The actual swap is done by
-     *  enabling exactly one of the two <activity-alias> entries via PackageManager, this bool just
-     *  records the user's choice so the App Icon control reflects it across restarts. */
-    const val KEY_APP_ICON_NAVY = "noop.appIconNavy"
-
-    fun appIconNavy(context: Context): Boolean =
-        of(context).getBoolean(KEY_APP_ICON_NAVY, false)
-
-    fun setAppIconNavy(context: Context, navy: Boolean) {
-        of(context).edit().putBoolean(KEY_APP_ICON_NAVY, navy).apply()
-    }
-
     /** Imperial/Metric display preference (D#103). Display-only, stored data stays SI. The length/mass
      *  system is read by [UnitPrefs.system]; the temperature override (empty = "match the system") by
      *  [UnitPrefs.temperature]. Mirrors macOS @AppStorage("units.system" / "units.temperature"). */
@@ -447,6 +431,30 @@ object NoopPrefs {
 
     fun setHcHrFrontier(context: Context, tsSec: Long) {
         of(context).edit().putLong(KEY_HC_HR_FRONTIER, tsSec).apply()
+    }
+
+    /** Manual sleep only: automatic sleep detection is fully disabled; nights come exclusively from the
+     *  Sleep screen's "Going to sleep" / "I'm awake" marks (or a hand-added session). Opt-in, default
+     *  OFF — flipping it on makes the mark buttons DEFINE the night instead of only logging it. */
+    const val KEY_MANUAL_SLEEP_ONLY = "noop.manualSleepOnly"
+
+    fun manualSleepOnly(context: Context): Boolean =
+        of(context).getBoolean(KEY_MANUAL_SLEEP_ONLY, false)
+
+    fun setManualSleepOnly(context: Context, enabled: Boolean) {
+        of(context).edit().putBoolean(KEY_MANUAL_SLEEP_ONLY, enabled).apply()
+    }
+
+    /** The pending "Going to sleep" instant (epoch ms; 0 = none) awaiting its "I'm awake" twin in
+     *  manual-sleep-only mode. Persisted (not in-memory) so a bedtime marked at 23:40 survives the app
+     *  being killed overnight and the morning wake tap still closes the night. */
+    const val KEY_PENDING_BEDTIME_MS = "noop.pendingBedtimeMs"
+
+    fun pendingBedtimeMs(context: Context): Long =
+        of(context).getLong(KEY_PENDING_BEDTIME_MS, 0L)
+
+    fun setPendingBedtimeMs(context: Context, ms: Long) {
+        of(context).edit().putLong(KEY_PENDING_BEDTIME_MS, ms).apply()
     }
 
     /** Smart alarm: arm the strap's firmware alarm to buzz at a wake time. Default off; default time 07:00. */
@@ -566,20 +574,6 @@ object NoopPrefs {
         of(context).edit().putBoolean(KEY_HYDRATION_TRACKING, enabled).apply()
     }
 
-    /** "Day-cycle background" (#698): the time-of-day scene (sunrise / day / dusk / night) behind the
-     *  Today screen. Default ON, it's the v7 atmosphere. Some people find the moving scene distracting
-     *  and want a plain dark canvas, so turning this off makes TodayScreen drop the SceneScreenBackground
-     *  and fall back to the flat surface; the cards already sit on an opaque canvas, so they stay just as
-     *  readable. Mirrors macOS @AppStorage("noop.showDayCycleBackground"). */
-    const val KEY_SHOW_DAY_CYCLE_BACKGROUND = "noop.showDayCycleBackground"
-
-    fun showDayCycleBackground(context: Context): Boolean =
-        of(context).getBoolean(KEY_SHOW_DAY_CYCLE_BACKGROUND, true)
-
-    fun setShowDayCycleBackground(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_SHOW_DAY_CYCLE_BACKGROUND, enabled).apply()
-    }
-
     /** Card-surface opacity as a PERCENT (0 = fully see-through, 100 = solid; default 100). Drives the
      *  "Card transparency" setting — every frosted card (Heart Rate, Key Metrics, Recovery Vitals, …)
      *  reads it via [CardAppearance]. Only the glass surface fades; the card content stays readable. */
@@ -590,33 +584,6 @@ object NoopPrefs {
 
     fun setCardOpacityPercent(context: Context, percent: Int) {
         of(context).edit().putInt(KEY_CARD_OPACITY, percent.coerceIn(0, 100)).apply()
-    }
-
-    /** "Sky behind cards" (opt-in, default OFF): extend the day-cycle sky behind the WHOLE Today scroll
-     *  (not just the top band) so the Card-transparency slider reveals it under every card. Pairs with
-     *  [showDayCycleBackground] — no effect when the scene is off. Read once on Today entry. */
-    const val KEY_SKY_BEHIND_CARDS = "noop.skyBehindCards"
-
-    // Default ON: the day-cycle sky extends behind the whole scroll out of the box. Still user-toggleable
-    // in Settings ("Sky behind cards"); only never-toggled users pick up the new default. Twin of the iOS
-    // @AppStorage(SkyBehindCardsPrefs.enabledKey) defaults.
-    fun skyBehindCards(context: Context): Boolean =
-        of(context).getBoolean(KEY_SKY_BEHIND_CARDS, true)
-
-    fun setSkyBehindCards(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_SKY_BEHIND_CARDS, enabled).apply()
-    }
-
-    /** Coach on-device signals (v5): when ON, the opt-in BYO-key Coach's grounding context may include a
-     *  SUMMARY-ONLY line of on-device correlations + Lab Book markers (no raw egress). A SECOND opt-in on
-     *  top of the existing "let the coach use my data" consent. Default OFF, keeps the anonymity posture. */
-    const val KEY_COACH_SIGNALS = "noop.coachSignals"
-
-    fun coachSignals(context: Context): Boolean =
-        of(context).getBoolean(KEY_COACH_SIGNALS, false)
-
-    fun setCoachSignals(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_COACH_SIGNALS, enabled).apply()
     }
 
     /** The user's EDITED Coach system prompt. Empty/absent means "use the built-in default". A small,
@@ -635,7 +602,7 @@ object NoopPrefs {
         else of(context).edit().putString(KEY_COACH_SYSTEM_PROMPT, prompt).apply()
     }
 
-    /** "Auto-detect workouts" (MVP, opt-in, on-device, NON-DESTRUCTIVE). When ON, NOOP scans the last
+    /** "Auto-detect workouts" (MVP, opt-in, on-device, NON-DESTRUCTIVE). When ON, POOP scans the last
      *  day or two of strap HR for a sustained-elevated bout and surfaces ONE dismissible Today card
      *  suggesting you save it, it NEVER creates a workout on its own (the user taps Save). Default OFF;
      *  when off no detection runs and no card shows. Mirrors macOS/iOS @AppStorage("autoDetectWorkouts"). */
@@ -921,16 +888,6 @@ fun NoopRoot() {
     var onboarded by remember {
         mutableStateOf(prefs.getBoolean(NoopPrefs.KEY_ONBOARDED, false))
     }
-    var lastSeenChangelog by remember {
-        mutableStateOf(prefs.getString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, "") ?: "")
-    }
-
-    // Seed the current What's New into the Updates inbox ONCE per version (idempotent, tracks the last
-    // seeded version), for onboarded users only so a brand-new user's first run isn't pre-populated. The
-    // bell in the Today header surfaces it; the inbox row deep-links to the full changelog read.
-    LaunchedEffect(onboarded) {
-        if (onboarded) UpdateStore.from(context).seedWhatsNewIfNeeded()
-    }
 
     // Terms acknowledgment gate, over EVERYTHING (before onboarding/pairing/Bluetooth) until the
     // current terms version is accepted; re-appears if the terms materially change. (clickwrap)
@@ -952,43 +909,13 @@ fun NoopRoot() {
         OnboardingScreen(
             viewModel = appViewModel,
             onFinished = {
-                // A brand-new user just saw the expectations in onboarding, don't also pop the
-                // changelog at them; mark them current (mirrors macOS ContentView onFinished).
-                prefs.edit()
-                    .putBoolean(NoopPrefs.KEY_ONBOARDED, true)
-                    .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-                    .apply()
-                lastSeenChangelog = AppChangelog.CURRENT_VERSION
+                prefs.edit().putBoolean(NoopPrefs.KEY_ONBOARDED, true).apply()
                 onboarded = true
             },
         )
         return
     }
 
-    // Existing, onboarded user: render the app, and if they've updated since last launch
-    // (stored version behind current), show "What's New" once over the top.
+    // Existing, onboarded user: render the app.
     AppRoot(viewModel = appViewModel)
-
-    if (lastSeenChangelog != AppChangelog.CURRENT_VERSION) {
-        Dialog(
-            onDismissRequest = {
-                prefs.edit()
-                    .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-                    .apply()
-                lastSeenChangelog = AppChangelog.CURRENT_VERSION
-            },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            Surface(modifier = Modifier.fillMaxSize(), color = Palette.surfaceBase) {
-                WhatsNewSheet(
-                    onClose = {
-                        prefs.edit()
-                            .putString(NoopPrefs.KEY_LAST_SEEN_CHANGELOG, AppChangelog.CURRENT_VERSION)
-                            .apply()
-                        lastSeenChangelog = AppChangelog.CURRENT_VERSION
-                    },
-                )
-            }
-        }
-    }
 }

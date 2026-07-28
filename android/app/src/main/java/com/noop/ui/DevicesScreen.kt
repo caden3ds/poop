@@ -92,22 +92,10 @@ import kotlinx.coroutines.launch
 // The registry's reads are one-shot suspend (not a Flow), so the screen keeps the list in a remembered
 // state and reloads it after every mutation via [reload].
 
-// MARK: - Liquid hero tokens (the liquid Devices restyle)
-//
-// The ACTIVE device card is the screen's hero: it floats over the day-of-sky as a translucent near-black
-// frosted card so the strap name + the live battery tube stay crisp on it. Same tokens as the liquid Today
-// hero (heroFill = rgba(13,14,20,.80), radius 26, white@0.11 hairline). Those Today constants are private to
-// TodayScreen, so the identical values are declared here. Mirrors the iOS liquid heroCard.
-private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIQUID_HERO_RADIUS: Dp = 26.dp
 
 @Composable
 fun DevicesScreen(
     viewModel: AppViewModel,
-    /** Routes to the non-destructive file-import lane (Data Sources). The Oura adopt wizard's "Keep the
-     *  Oura app instead (import a file)" link and every honest Oura failure offer this. Defaults to a no-op
-     *  so existing call sites keep compiling; AppRoot wires it to navigate to Data Sources. */
-    onUseFileImport: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val live by viewModel.live.collectAsStateWithLifecycle()
@@ -119,8 +107,6 @@ fun DevicesScreen(
     // Liquid sky backdrop gate — the SAME "Day-cycle background" preference the liquid Today honours (#698,
     // default ON). Off falls back to the flat dark canvas, so the setting governs every liquid screen alike.
     val context = LocalContext.current
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     // The current device list, reloaded after each registry op. Null while the first read is in flight.
     var devices by remember { mutableStateOf<List<PairedDeviceRow>?>(null) }
@@ -156,22 +142,14 @@ fun DevicesScreen(
     // Conditional rows use `if (cond) { item/items }` so a hidden section adds no row.
     LazyScreenScaffold(
         title = uiString(R.string.l10n_devices_screen_devices_df485c87),
-        subtitle = "Pair and manage the bands NOOP reads from.",
-        // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
-        // into the flat canvas behind the top of the screen so the frosted device cards float over it. The
-        // static sky (LiquidSkyStatic inside the helper) carries no per-frame cost on this scrolling list.
-        // Gated on the same "Day-cycle background" setting as Today; off passes null for the plain canvas.
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
-        // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
+        subtitle = "Pair and manage the bands POOP reads from.",
     ) {
         if (devices == null) {
             // The registry resolves a beat after launch. Show a calm pending note in that brief window.
             item {
             DataPendingNote(
                 title = uiString(R.string.l10n_devices_screen_getting_your_devices_ready_bd391949),
-                body = "NOOP is opening your on-device data. Your paired bands will appear here in a moment.",
+                body = "POOP is opening your on-device data. Your paired bands will appear here in a moment.",
             )
             }
             return@LazyScreenScaffold
@@ -272,9 +250,6 @@ fun DevicesScreen(
         AddDeviceWizard(
             viewModel = viewModel,
             onClose = { showAddWizard = false; reload() },
-            // The Oura gate's file-import links close the wizard and route to Data Sources, so the
-            // non-destructive lane is always one tap away (it is never the only door).
-            onUseFileImport = { showAddWizard = false; reload(); onUseFileImport() },
         )
     }
 
@@ -309,7 +284,7 @@ fun DevicesScreen(
     removeTarget?.let { device ->
         ConfirmDialog(
             title = uiString(R.string.l10n_devices_screen_remove_this_device_dd9dbda9),
-            message = "Remove ${displayName(device)}? NOOP will stop connecting to it. Its recorded data is " +
+            message = "Remove ${displayName(device)}? POOP will stop connecting to it. Its recorded data is " +
                 "kept and you can re-add it any time.",
             confirmLabel = "Remove",
             destructive = true,
@@ -461,15 +436,15 @@ private fun DeviceCard(
     val profile = deviceProfile(device)
     // The per-device actions menu's open state is hoisted here so the WHOLE card is a tap target that opens
     // the same menu the trailing ⋮ button does — additive, non-destructive (the menu still gates every
-    // action + confirm), and it gives the card a real `clickable` to drive `liquidPress`.
+    // action + confirm), and it gives the card a real `clickable` to drive `pressable`.
     var menuOpen by remember { mutableStateOf(false) }
-    // liquidPress: the SAME interactionSource feeds the card's clickable and the press modifier, so the
+    // pressable: the SAME interactionSource feeds the card's clickable and the press modifier, so the
     // whole card settles inward on press (the iOS LiquidPressStyle feel). Applied on the OUTER card so the
     // frosted surface + content scale/dim as one, matching the liquid Today cards.
     val interaction = remember { MutableInteractionSource() }
     val cardModifier = Modifier
         .alpha(if (dimmed) 0.6f else 1f)
-        .liquidPress(interaction)
+        .pressable(interaction)
         .clickable(
             interactionSource = interaction,
             indication = null,
@@ -477,7 +452,7 @@ private fun DeviceCard(
         ) { menuOpen = true }
 
     // The ACTIVE device is the hero: the liquid translucent-black frosted card (rgba(13,14,20,.80), radius
-    // 26, white@0.11 hairline) so it floats over the day-of-sky, matching the liquid Today hero. Every other
+    // radius, hairline) via the shared frostedCardSurface, matching every other hero. Every other
     // card (paired / removed) keeps the crisp neutral NoopCard frosted surface.
     val body: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -498,23 +473,7 @@ private fun DeviceCard(
                     Text(displayName(device), style = NoopType.headline, color = Palette.textPrimary)
                     Text(profile.displayModel, style = NoopType.subhead, color = Palette.textSecondary)
                 }
-                // Locally-adopted Oura is Beta: a non-dot Beta chip sits beside the usual state pill.
-                if (device.sourceKind == SourceKind.oura.name) {
-                    StatePill("Beta", tone = StrandTone.Warning, showsDot = false)
-                    Spacer(Modifier.width(6.dp))
-                }
                 StatePill(device, isActive, isLiveConnected, bondRefused, isReconnecting)
-            }
-
-            // Honest local-takeover state row for an adopted Oura ring that is paired but not the
-            // active+connected source right now. States the single-owner reality plainly (if the ring was
-            // reset again or re-claimed in the Oura app, NOOP no longer owns it) without faking a live
-            // reading. Suppressed for the active+connected ring and for removed rings. Mirrors the macOS
-            // ouraLocalStateNote.
-            if (device.sourceKind == SourceKind.oura.name && !isLiveConnected &&
-                device.status == DeviceStatus.paired.name
-            ) {
-                OuraLocalStateNote()
             }
 
             // What this device CAPTURES — honest, per-model (not the generic stored set, which would
@@ -535,7 +494,7 @@ private fun DeviceCard(
 
             // Live battery as a small liquid TUBE — the active+connected device's reported % (WHOOP, a
             // generic strap or an FTMS machine all funnel into live.batteryPct). A genuine single-value
-            // progress bar, so a static (posed) LiquidTube is exactly right; it replaces the "· Battery x%"
+            // progress bar, so a static (posed) MetricBar is exactly right; it replaces the "· Battery x%"
             // that used to sit in the text line below. The SAME `liveBatteryPct` binding drives it.
             if (liveBatteryPct != null) {
                 BatteryTube(pct = liveBatteryPct)
@@ -582,9 +541,8 @@ private fun DeviceCard(
         Box(
             modifier = cardModifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
-                .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
-                .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
+                .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface()
                 .padding(18.dp),
         ) {
             body()
@@ -600,7 +558,7 @@ private fun DeviceCard(
 }
 
 /**
- * The active+connected device's live battery as a small liquid tube. A posed (static) [LiquidTube] fills to
+ * The active+connected device's live battery as a small liquid tube. A posed (static) [MetricBar] fills to
  * the reported percent in the accent, with a leading "Battery" label + the trailing %, so the same figure
  * that used to read as "· Battery x%" in the meta line now reads as the liquid vessel the design calls for.
  */
@@ -613,7 +571,7 @@ private fun BatteryTube(pct: Int) {
         modifier = Modifier.semantics { contentDescription = uiString(R.string.l10n_devices_screen_battery_clamped_2494c8c9, clamped) },
     ) {
         Text(uiString(R.string.l10n_devices_screen_battery_4a9be042), style = NoopType.footnote, color = Palette.textTertiary)
-        LiquidTube(
+        MetricBar(
             frac = clamped / 100.0,
             tint = Palette.accent,
             animated = false,
@@ -1181,7 +1139,6 @@ internal fun displayName(device: PairedDeviceRow): String {
 private fun deviceIcon(device: PairedDeviceRow): ImageVector = when {
     device.sourceKind == SourceKind.ftms.name -> Icons.AutoMirrored.Filled.DirectionsRun
     device.sourceKind == SourceKind.huami.name -> Icons.Filled.GraphicEq
-    device.sourceKind == SourceKind.oura.name -> Icons.Filled.Circle
     SourceCoordinator.isWhoop(device) -> Icons.Filled.Watch
     else -> Icons.Filled.FavoriteBorder
 }
@@ -1219,37 +1176,16 @@ private fun deviceProfile(device: PairedDeviceRow): DeviceCapabilityProfile {
             captures = "Heart rate (live, best-effort)",
             powers = "Powers the live console + Effort. No Charge, Rest or Sleep",
             footnote = "Experimental: live heart rate where the band exposes it. Some bands need a pairing " +
-                "we can't do yet. NOOP will say so honestly and never show a made-up number. No sleep, " +
+                "we can't do yet. POOP will say so honestly and never show a made-up number. No sleep, " +
                 "recovery, skin temp, SpO₂ or steps.",
         )
     }
     // EXPERIMENTAL locally-adopted Oura ring (gen 3/4/5). The gen is carried on `model` ("Oura Ring
-    // 3/4/5") and recovered with OuraRingGen.from(model). NOOP reads the ring's OWN raw signals + open
+    // 3/4/5") and recovered with OuraRingGen.from(model). POOP reads the ring's OWN raw signals + open
     // HRV/sleep-phase tags and computes its own Charge/Effort/Rest; it NEVER reads Oura's encrypted
     // Readiness/Sleep scores, and claims NO absolute SpO₂ %. Estimates carry "*"; a signal it can't read
     // stays "-". Per-gen copy + the canonical Beta caveat (spec
     // docs/superpowers/specs/2026-06-29-oura-onboarding-ux.md s3/s4). Mirrors the macOS Oura branch.
-    if (device.sourceKind == SourceKind.oura.name) {
-        val gen = com.noop.oura.OuraRingGen.from(device.model)
-        // gen3/4 are verified-shape; gen5 ("newer") carries the least-proven caveat.
-        val newer = gen == com.noop.oura.OuraRingGen.GEN5
-        val captures = if (newer)
-            "Heart rate* · HRV* · Sleep* · Resting HR* · Skin temp* · Battery*"
-        else
-            "Heart rate · HRV* · Sleep · Resting HR · Skin temp* · Battery"
-        val powers = if (newer)
-            "Powers Effort now; Charge and Rest once enough nights and decode are confirmed"
-        else
-            "Powers Charge, Effort, Rest and Sleep"
-        return DeviceCapabilityProfile(
-            displayModel = "${gen.displayName} (Beta)",
-            captures = captures,
-            powers = powers,
-            footnote = "Beta. * is an on-device estimate. Skin temp is a trend versus your own baseline, " +
-                "and HRV needs you to be still. No Oura Readiness or SpO₂ " +
-                "percentage comes off the ring (import an Oura file for those).",
-        )
-    }
     // Generic heart-rate strap: live HR + R-R only; drives the live console + Effort, nothing nightly.
     if (!SourceCoordinator.isWhoop(device)) {
         return DeviceCapabilityProfile(
@@ -1304,26 +1240,6 @@ private fun CapabilityInfoRow(icon: androidx.compose.ui.graphics.vector.ImageVec
     }
 }
 
-/**
- * Honest paired-but-not-connected note for a locally-adopted Oura ring (Beta). Amber heads-up, no
- * fabricated reading: re-states the single-owner reality so the user understands why a re-reset or an Oura
- * re-claim would break NOOP's ownership. Mirrors the macOS DeviceCard.ouraLocalStateNote (no em-dashes).
- */
-@Composable
-private fun OuraLocalStateNote() {
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Icon(Icons.Filled.Info, contentDescription = null, tint = Palette.statusWarning, modifier = Modifier.size(14.dp))
-        Text(
-            uiString(R.string.l10n_devices_screen_paired_locally_noop_owns_this_ring_30c16190) +
-                "up in the Oura app, NOOP no longer owns it and you would re-add it to take it over.",
-            style = NoopType.caption,
-            color = Palette.statusWarning,
-        )
-    }
-}
 
 private fun lastSeenLine(device: PairedDeviceRow, isLiveConnected: Boolean, bondRefused: Boolean = false): String = when {
     device.status == DeviceStatus.archived.name -> "Removed · data kept"

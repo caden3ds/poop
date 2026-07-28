@@ -139,22 +139,10 @@ fun HealthScreen(
     val bpm by vm.bpm.collectAsStateWithLifecycle()
     val hasLiveHr by remember { derivedStateOf { displayHr(bpm, live) != null } }
 
-    // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles into
-    // the theme canvas behind this screen's top region, full-bleed up behind the status bar via the
-    // scaffold's topBackground plumbing, replacing the classic scene backdrop. Static (LiquidSkyStatic,
-    // inside the helper) — never an animated sky behind a scrolling list. Gated on the shared "Day-cycle
-    // background" pref (default ON) exactly like Today; OFF passes null so the scaffold paints the flat
-    // surface canvas instead.
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     LazyScreenScaffold(
         title = uiString(R.string.l10n_health_screen_health_monitor_c4abc3fc),
         subtitle = "Live vitals, streamed from the strap.",
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
-        // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         if (today == null && !hasLiveHr) {
             // Even with no history yet, a freshly-connected strap can be told to sync now (#364) — the
@@ -366,12 +354,12 @@ private fun RecordRow(
     subtitle: String,
     onClick: () -> Unit,
 ) {
-    // liquidPress on the whole tappable row — the SAME interactionSource drives the clickable + the press
+    // pressable on the whole tappable row — the SAME interactionSource drives the clickable + the press
     // so the card settles inward on tap (the pilot LiquidPressStyle feel). Nav route is unchanged.
     val interaction = remember { MutableInteractionSource() }
     NoopCard(
         modifier = Modifier
-            .liquidPress(interaction)
+            .pressable(interaction)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -734,12 +722,12 @@ private fun VitalityHero(
     val best = sorted.firstOrNull()
     val worst = sorted.lastOrNull()
     // The frosted liquid hero-card wrapper floats the vessel + white count-up over the sky (the pilot).
-    LiquidHeroCard {
+    HeroCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Overline("Vitality")
-                    // The Vitality 0–100 rides a filling LiquidVessel on the charge world, the count-up
+                    // The Vitality 0–100 rides a filling ScoreRing on the charge world, the count-up
                     // number rolled up over it (white, tabular) — the Today HeroScoreVessel idiom. Same
                     // value + fraction (vitality / 100) as the bare headline this replaced.
                     HealthHeroVessel(
@@ -781,26 +769,17 @@ private fun VitalityHero(
     }
 }
 
-// MARK: - Liquid hero-card wrapper + hero vessel (the pilot idiom)
-//
-// The frosted translucent-black hero-card wrapper (mock rgba(13,14,20,.80), radius 26, white@0.11
-// hairline) that floats the hero over the day-of-sky so the vessel + white count-up stay crisp — the
-// card does the contrast work, not a muted sky. Byte-matched to the Today pilot's LIQUID_HERO_* values.
-private val HEALTH_HERO_FILL: Color =
-    Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val HEALTH_HERO_RADIUS: Dp = 26.dp
 
 /** Wrap a hero's content in the frosted liquid glass surface so it floats over the sky backdrop. Applied
  *  to the HERO cards only (Fitness Age, Vitality), matching the pilot's heroCard: the content sits DIRECTLY
  *  in the translucent box (no inner NoopCard surface to double up on the glass), padded like a card. */
 @Composable
-private fun LiquidHeroCard(content: @Composable () -> Unit) {
+private fun HeroCard(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(HEALTH_HERO_RADIUS))
-            .background(HEALTH_HERO_FILL)
-            .border(1.dp, Color.White.copy(alpha = 0.11f), RoundedCornerShape(HEALTH_HERO_RADIUS))
+            .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface()
             .padding(Metrics.cardPadding),
     ) {
         content()
@@ -808,7 +787,7 @@ private fun LiquidHeroCard(content: @Composable () -> Unit) {
 }
 
 /**
- * The health hero gauge: a [LiquidVessel] filled to [fraction] (0..1) in the domain [tint], with a
+ * The health hero gauge: a [ScoreRing] filled to [fraction] (0..1) in the domain [tint], with a
  * [CountUpText] rolled up over it — white, tabular, a soft shadow, hit-transparent so a tap falls through
  * to the vessel (which owns its own splash+haptic). The Today `HeroScoreVessel` idiom, reused verbatim so
  * the Fitness Age / Vitality numbers ride a filling vessel instead of a bare hand-drawn gauge. The number
@@ -826,7 +805,7 @@ private fun HealthHeroVessel(
     format: (Double) -> String = { it.roundToInt().toString() },
 ) {
     Box(modifier = modifier.size(diameter), contentAlignment = Alignment.Center) {
-        LiquidVessel(
+        ScoreRing(
             value = fraction.coerceIn(0.0, 1.0),
             tint = tint,
             animated = animated,
@@ -870,17 +849,17 @@ private fun FitnessAgeHero(
         (0.5 + (chronoAge - fitnessAge) / 10.0).coerceIn(0.0, 1.0)
     } else 0.5
 
-    // The "How accurate is this?" toggle presses inward on tap (the pilot liquidPress feel); the SAME
+    // The "How accurate is this?" toggle presses inward on tap (the pilot pressable feel); the SAME
     // interactionSource drives its clickable + press.
     val howAccurateInteraction = remember { MutableInteractionSource() }
 
     // The frosted liquid hero-card wrapper floats the vessel + white count-up over the sky (the pilot).
-    LiquidHeroCard {
+    HeroCard {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
                 Column(modifier = Modifier.weight(1f)) {
                     Overline("Fitness Age")
-                    // The hero age rides a filling LiquidVessel on the gold Charge world, the age number
+                    // The hero age rides a filling ScoreRing on the gold Charge world, the age number
                     // rolled up over it (white, tabular) — the Today HeroScoreVessel idiom. The shown NUMBER
                     // is the same value (fitnessAge, rounded) as the bare headline this replaced.
                     HealthHeroVessel(
@@ -915,7 +894,7 @@ private fun FitnessAgeHero(
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(Metrics.cornerSm))
-                    .liquidPress(howAccurateInteraction)
+                    .pressable(howAccurateInteraction)
                     .clickable(
                         interactionSource = howAccurateInteraction,
                         indication = null,
@@ -1186,8 +1165,7 @@ private fun HeartRateSection(vm: AppViewModel, hrMax: Int) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(Metrics.cardRadius))
-                .timeOfDayBackground(),
+                .clip(RoundedCornerShape(Metrics.cardRadius)),
         ) {
             NoopCard(padding = Metrics.space18, tint = Palette.metricRose) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1457,7 +1435,7 @@ private fun VitalsSection(
                 horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
             ) {
                 rowVitals.forEach { v ->
-                    // liquidPress on the tappable vital tile — the SAME interactionSource drives its
+                    // pressable on the tappable vital tile — the SAME interactionSource drives its
                     // clickable + the press so the whole tile settles inward on tap (the pilot feel).
                     // Keyed on the vital key so each tile keeps a stable source across recomposition.
                     // The detail route (onVitalClick) is unchanged.
@@ -1465,7 +1443,7 @@ private fun VitalsSection(
                     VitalTile(
                         modifier = Modifier
                             .weight(1f)
-                            .liquidPress(tileInteraction)
+                            .pressable(tileInteraction)
                             .clickable(
                                 interactionSource = tileInteraction,
                                 indication = null,
@@ -1489,7 +1467,7 @@ private fun VitalsSection(
             Text(
                 text = uiString(R.string.l10n_health_screen_spo_respiratory_rate_and_skin_temperature_0ae0ad8f) +
                     "aggregates from your most recent imported day; resting HR and HRV update daily. " +
-                    "Once NOOP has 14 nights of history, in-range compares each vital to your own " +
+                    "Once POOP has 14 nights of history, in-range compares each vital to your own " +
                     "baseline (approximate, not medical advice); until then typical adult ranges apply.",
                 style = NoopType.footnote,
                 color = Palette.textTertiary,
@@ -1666,12 +1644,6 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     // view isn't showing: Fitness Age with no reading yet -> what it still needs; ANY metric with a single
     // reading -> that reading (trend to follow); two+ -> the trend. Pre-load falls through to trend.
     val loadedPoints = if (seriesLoaded) (detail?.points?.size ?: 0) else -1
-    // #430 parity: the detail carries the SAME backdrop as the screen that pushed it — the day-cycle sky
-    // when the setting is on (full-viewport when "Sky behind cards" is also on, so the transparent cards
-    // reveal it the whole way down; the top band otherwise), the plain canvas when off. Same gates the
-    // Today screen uses.
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
     ScreenScaffold(
         title = detail?.title ?: "Vital Signs",
         subtitle = when {
@@ -1679,10 +1651,6 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             loadedPoints == 1 -> "Your latest reading — trend to follow."
             else -> "Historical trend from cached daily metrics."
         },
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards needs the full-viewport container too — the band container's status-bar
-        // offset left the lower cards on plain canvas (tester report).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         if (isSeriesBacked && !seriesLoaded) {
             DataPendingNote(
@@ -1750,7 +1718,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
             }
             DataPendingNote(
                 title = uiString(R.string.l10n_health_screen_not_enough_history_yet_0e2f93b6),
-                body = "This vital needs at least two historical readings before NOOP can chart it.",
+                body = "This vital needs at least two historical readings before POOP can chart it.",
             )
             return@ScreenScaffold
         }
@@ -2071,8 +2039,11 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
             strapDeviceId = vm.activeStrapId)
             .points.associateBy({ it.day }, { VitalReading(it.day, it.value, it.source) })
         val imported = LinkedHashMap<String, VitalReading>()
-        for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
-            vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
+        // Gate the two whole-table scans behind one cheap COUNT: nothing in the shipping app can write
+        // imported daily rows since the importers were removed, so these were scanning to find nothing.
+        for (r in if (!vm.repo.hasImportedDailySources()) emptyList() else
+            vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
+                vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
             val s = r.steps
             if (s != null && s > 0) imported.putIfAbsent(r.day, VitalReading(r.day, s.toDouble(), r.deviceId))
         }
@@ -2100,8 +2071,11 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
             strapDeviceId = vm.activeStrapId)
             .points.associateBy({ it.day }, { VitalReading(it.day, it.value, it.source) })
         val imported = LinkedHashMap<String, VitalReading>()
-        for (r in vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
-            vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
+        // Gate the two whole-table scans behind one cheap COUNT: nothing in the shipping app can write
+        // imported daily rows since the importers were removed, so these were scanning to find nothing.
+        for (r in if (!vm.repo.hasImportedDailySources()) emptyList() else
+            vm.repo.appleDaily("apple-health", "0000-01-01", "9999-12-31") +
+                vm.repo.appleDaily("health-connect", "0000-01-01", "9999-12-31")) {
             val k = r.activeKcal
             if (k != null && k > 0) imported.putIfAbsent(r.day, VitalReading(r.day, k, r.deviceId))
         }
@@ -2123,7 +2097,6 @@ private suspend fun buildSeriesVitalDetail(vm: AppViewModel, key: String): Vital
 private fun HealthEmptyState() {
     DataPendingNote(
         title = uiString(R.string.l10n_health_screen_no_biometrics_yet_7c594a6c),
-        body = "No biometrics yet. Import your WHOOP export (and Apple Health if you " +
-            "have it) in Data Sources to fill this in.",
+        body = "No biometrics yet. Wear the strap overnight and these fill in as it syncs.",
     )
 }

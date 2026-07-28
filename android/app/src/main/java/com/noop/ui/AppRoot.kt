@@ -44,7 +44,6 @@ import androidx.compose.material.icons.filled.Hexagon
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.MonitorHeart
-import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Sensors
@@ -104,10 +103,9 @@ import androidx.navigation.compose.rememberNavController
 // MARK: - Navigation model
 //
 // The macOS app's sidebar holds many sections; on Android (mirroring the iOS RootTabView) we surface
-// them through a unified floating "glass" bottom bar (Today · Trends · Sleep · More) for the everyday
-// screens, with a "More" sheet that lists the full grouped set — so every destination is one tap away
-// without a global hamburger/drawer. Destinations are grouped exactly as the sidebar groups them.
-// Routes whose screens belong to later waves point at a ComingSoon placeholder so the app compiles today.
+// This fork surfaces THREE tabs — Day · Live · Sleep — in a floating "glass" bottom bar. There is no
+// More page: everything else is reached from Settings (the gear in the Day header) or by tapping the
+// card that owns it.
 
 /** A single drawer destination: stable route, display title (localized via [titleRes]), sidebar icon. */
 private enum class Destination(
@@ -117,39 +115,25 @@ private enum class Destination(
 ) {
     // Group: Today
     Today("today", R.string.nav_today, Icons.Filled.Home),
-    Intelligence("intelligence", R.string.nav_intelligence, Icons.Filled.Psychology),
     // Optional, default-OFF (task #43): the Coupled view (WHOOP-style day read). Reached ONLY via the
     // Today dashboard "Coupled view" card tap-through, so it is deliberately NOT in any [DrawerGroup].
-    CoupledView("coupled_view", R.string.nav_coupled_view, Icons.Filled.Hexagon),
 
     // Group: Live
     Live("live", R.string.nav_live, Icons.Filled.FavoriteBorder),
-    Intervals("intervals", R.string.nav_intervals, Icons.Filled.Timeline),
 
     // Group: Recovery
     Sleep("sleep", R.string.nav_sleep, Icons.Filled.Bedtime),
-    Breathe("breathe", R.string.nav_breathe, Icons.Filled.Air),
     Stress("stress", R.string.nav_stress, Icons.Filled.Spa),
 
     // Group: Activity
     Workouts("workouts", R.string.nav_workouts, Icons.Filled.FitnessCenter),
-    Trends("trends", R.string.nav_trends, Icons.AutoMirrored.Filled.TrendingUp),
 
     // Group: Insight
-    Coach("coach", R.string.nav_coach, Icons.Filled.AutoAwesome),
-    InsightsHub("insights_hub", R.string.nav_insights_hub, Icons.Filled.Insights),
-    Insights("insights", R.string.nav_insights, Icons.Filled.Insights),
-    Explore("explore", R.string.nav_explore, Icons.Filled.Explore),
-    Compare("compare", R.string.nav_compare, Icons.AutoMirrored.Filled.CompareArrows),
 
     // Group: Health
     Health("health", R.string.nav_health, Icons.Filled.MonitorHeart),
-    Hydration("hydration", R.string.nav_hydration, Icons.Filled.WaterDrop),
     VitalSigns("vital_signs", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
     VitalSignsDetail("vital_detail/{key}", R.string.nav_vital_signs, Icons.Filled.HealthAndSafety),
-    LabBook("lab_book", R.string.nav_lab_book, Icons.Filled.HealthAndSafety),
-    Rhythm("rhythm", R.string.nav_rhythm, Icons.Filled.MonitorHeart),
-    AppleHealth("apple_health", R.string.nav_apple_health, Icons.Filled.HealthAndSafety),
 
     // Group: System
     Automations("automations", R.string.nav_automations, Icons.Filled.Bolt),
@@ -159,16 +143,10 @@ private enum class Destination(
     // name fits. Route id stays "smart_alarm" (display string only).
     SmartAlarm("smart_alarm", R.string.nav_alarms, Icons.Filled.Alarm),
     Devices("devices", R.string.nav_devices, Icons.Filled.Sensors),
-    DataSources("data_sources", R.string.nav_data_sources, Icons.Filled.Storage),
     BackupSync("backup_sync", R.string.nav_backup_sync, Icons.Filled.CloudSync),
-    FusedRecord("fused_record", R.string.nav_fused_record, Icons.AutoMirrored.Filled.CompareArrows),
     Notifications("notifications", R.string.nav_notifications, Icons.Filled.Notifications),
     Settings("settings", R.string.nav_settings, Icons.Filled.Settings),
-    TestCentre("test_centre", R.string.nav_test_centre, Icons.Filled.BugReport),
-
-    // The "More" tab: its own navigated page (mirroring the iOS More tab) that hosts the full
-    // grouped destination list. It is NOT itself in any [DrawerGroup] — it's the door to them.
-    More("more", R.string.nav_more, Icons.Filled.MoreHoriz);
+    TestCentre("test_centre", R.string.nav_test_centre, Icons.Filled.BugReport);
 
     companion object {
         /** Resolve the destination owning the current back-stack route (defaults to Today). */
@@ -181,81 +159,10 @@ private enum class Destination(
     }
 }
 
-/** More-page groups, mirroring the iOS More tab exactly: Insights · Body · Data · App. `defaultExpanded`
- *  mirrors the iOS S2 default: Insights + Body open at rest, Data + App collapsed to just their header. */
-// [header] is the STABLE persistence key (stored in SharedPreferences and kept byte-identical to iOS's
-// `more.expandedSections` CSV — see [MoreSectionPrefs]); it must NEVER be localized. [headerRes] is the
-// localized DISPLAY label the More page shows. Decoupling the two lets the label translate without
-// touching the persisted open/closed state or the iOS parity of the stored string.
-private data class DrawerGroup(
-    val header: String,
-    @StringRes val headerRes: Int,
-    val items: List<Destination>,
-    val defaultExpanded: Boolean,
-)
-
-// Mirrors the iOS RootTabView `moreTab` grouping + order one-for-one. Today / Trends / Sleep are NOT
-// listed (they're bottom-bar tabs, exactly as on iOS). Android-only screens (Vital Signs, Wake Window,
-// Notifications, Devices) are slotted into the matching iOS group.
-private val drawerGroups: List<DrawerGroup> = listOf(
-    DrawerGroup("Insights", R.string.more_group_insights, listOf(
-        Destination.InsightsHub, Destination.Intelligence, Destination.Coach,
-        Destination.Insights, Destination.Explore, Destination.Compare,
-    ), defaultExpanded = true),
-    DrawerGroup("Body", R.string.more_group_body, listOf(
-        Destination.Live, Destination.Workouts, Destination.Health, Destination.VitalSigns,
-        Destination.LabBook, Destination.Stress, Destination.Breathe, Destination.Intervals,
-        Destination.Rhythm,
-    ), defaultExpanded = true),
-    DrawerGroup("Data", R.string.more_group_data, listOf(
-        Destination.FusedRecord, Destination.AppleHealth, Destination.DataSources,
-        Destination.BackupSync, Destination.Devices,
-    ), defaultExpanded = false),
-    DrawerGroup("App", R.string.more_group_app, listOf(
-        Destination.Automations, Destination.SmartAlarm, Destination.Notifications,
-        Destination.TestCentre, Destination.Settings,
-    ), defaultExpanded = false),
-)
-
-/** The headers open by default at first run, derived from [drawerGroups.defaultExpanded] (Insights +
- *  Body), so the seed lives in one place and the persistence default can't drift from the UI default. */
-private fun defaultExpandedHeaders(): Set<String> =
-    drawerGroups.filter { it.defaultExpanded }.map { it.header }.toSet()
-
 /**
- * Persisted open/closed state of the More page's collapsible groups (#860 item 2) - the Android twin of
- * the iOS `MoreSectionPrefs`. The set of EXPANDED group headers is stored as one sorted comma-joined
- * string under a single SharedPreferences key, encoded identically to iOS (same `more.expandedSections`
- * suffix, same CSV-of-headers, same Insights+Body default) so the two platforms behave the same. An empty
- * stored string is a valid state (everything collapsed), distinct from "never set" (which yields the seed).
- */
-internal object MoreSectionPrefs {
-    const val KEY = "noop.more.expandedSections"
-
-    /** Read the expanded-header set; returns [default] when the key was never written (first run). */
-    fun read(prefs: android.content.SharedPreferences, default: Set<String>): Set<String> {
-        val raw = prefs.getString(KEY, null) ?: return default
-        return decode(raw)
-    }
-
-    /** Persist the expanded-header set as a sorted, comma-joined string. */
-    fun write(prefs: android.content.SharedPreferences, headers: Set<String>) {
-        prefs.edit().putString(KEY, encode(headers)).apply()
-    }
-
-    /** Encode the set of expanded headers to a sorted, comma-joined string. */
-    fun encode(headers: Set<String>): String = headers.sorted().joinToString(",")
-
-    /** Decode the stored string to a set of expanded headers; blank tokens dropped, empty string -> empty set. */
-    fun decode(raw: String): Set<String> =
-        raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
-}
-
-/**
- * App shell: a single [Scaffold] with a floating [GlassBottomBar] (Today · Trends · Sleep · More)
+ * App shell: a single [Scaffold] with a floating [GlassBottomBar] (Day · Live · Sleep)
  * driving one [NavHost], mirroring the iOS RootTabView. There is NO global toolbar and no nav drawer
- * — every screen self-titles via [ScreenScaffold], and the "More" sheet (opened from the bar) reaches
- * every destination in [drawerGroups], so nothing is lost. A single [AppViewModel] is created here and
+ * — every screen self-titles via [ScreenScaffold]. A single [AppViewModel] is created here and
  * shared with every screen, so the BLE connection and cached metrics stay app-wide singletons.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -267,21 +174,14 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
     val currentRoute = backStack?.destination?.route
     val current = Destination.forRoute(currentRoute)
     var showQuickActions by remember { mutableStateOf(false) }
-    // The Updates inbox sheet (opened by the Today header bell). The store is a process singleton so
-    // the Today cards and the import path post to the same inbox this sheet renders.
     val context = androidx.compose.ui.platform.LocalContext.current
-    val updateStore = remember { UpdateStore.from(context) }
-    var showUpdatesInbox by remember { mutableStateOf(false) }
 
     run {
         Scaffold(
             containerColor = Palette.surfaceBase,
             bottomBar = {
-                // One unified "glass" bar: four evenly-spaced tabs — Today · Trends · Sleep · More
+                // One unified "glass" bar: three evenly-spaced tabs — Day · Live · Sleep
                 // (matches the iOS FloatingTabBar). The quick-action "+" lives in the Today header's
-                // top-right (balancing the avatar), so the bar is clean tabs only. "More" navigates to
-                // its own page (mirroring the iOS More tab) that reaches every grouped destination, so no
-                // destination is lost without the drawer.
                 GlassBottomBar(
                     current = current,
                     onTabSelected = { dest ->
@@ -311,26 +211,17 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         // The quick-action "+" lives in the Today header's top-right now (off the
                         // bottom bar) — it opens the same quick-action sheet the bar used to.
                         onQuickActions = { showQuickActions = true },
-                        // The Updates "ringer" — the bell sits before the +, and opens the inbox
-                        // sheet AppRoot presents (it owns the nav for deep-links).
-                        updateStore = updateStore,
-                        onOpenUpdates = { showUpdatesInbox = true },
                         // The leading profile avatar opens Settings (where the photo is set/changed),
                         // mirroring iOS's avatar-leading Today header. The drawer hamburger is unchanged.
                         onOpenSettings = { nav.navigateTopLevel(Destination.Settings.route) },
                         // The opt-in Hydration card (only shown when Hydration tracking is on) pushes its
                         // detail. A normal push so the back-stack returns to Today.
-                        onOpenHydration = { nav.navigate(Destination.Hydration.route) },
-                        // #706/#684: the dashboard cards draw a tappable chevron; wire each to its detail,
-                        // matching iOS. Stress + the vitals are pushes; Sleep is a top-level tab switch.
-                        onOpenStress = { nav.navigate(Destination.Stress.route) },
                         onOpenHealth = { nav.navigate(Destination.Health.route) },
                         // Every metric/vital card opens its OWN focused detail trend (vital_detail/<key>),
                         // not the shared Health hub (2026-07-03). Mirrors the iOS liquidCard metricDetail.
                         onOpenMetric = { key -> nav.navigate("vital_detail/$key") },
                         onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) },
                         // Optional Coupled view card (task #43): a normal push so back returns to Today.
-                        onOpenCoupled = { nav.navigate(Destination.CoupledView.route) },
                         // The "workout in progress" indicator: raise the one-shot the Live screen consumes to
                         // re-open the in-exercise overlay, then route to Live. One tap from Today (iOS parity).
                         onOpenActiveWorkout = {
@@ -342,56 +233,35 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onOpenDevices = { nav.navigateTopLevel(Destination.Devices.route) },
                         // #627: the journal-reminder card opens the journal (hosted in Insights), same
                         // destination the Sleep screen's morning sheet uses.
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
                     )
                 }
                 composable(Destination.Live.route) {
                     LiveScreen(
                         viewModel = viewModel,
                         onManageDevices = { nav.navigateTopLevel(Destination.Devices.route) },
+                        onOpenStress = { nav.navigate(Destination.Stress.route) },
                     )
                 }
                 composable(Destination.Sleep.route) {
                     SleepScreen(
                         vm = viewModel,
-                        onOpenJournal = { nav.navigateTopLevel(Destination.Insights.route) },
                     )
                 }
-                composable(Destination.CoupledView.route) {
-                    CoupledScreen(
-                        vm = viewModel,
-                        // Tapping Sleep in the coupled read opens the full Sleep screen (iOS parity).
-                        onOpenSleep = { nav.navigateTopLevel(Destination.Sleep.route) },
-                    )
-                }
-                composable(Destination.Intervals.route) { IntervalsScreen(viewModel) }
-                composable(Destination.Breathe.route) { BreatheScreen(viewModel) }
-                composable(Destination.Coach.route) { CoachScreen() }
-                composable(Destination.Explore.route) { TrendsExploreScreen(viewModel) }
-                composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
+                                composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
                 composable(Destination.SmartAlarm.route) { SmartAlarmScreen(viewModel) }
                 composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }
-                composable(Destination.Intelligence.route) { IntelligenceScreen(viewModel) }
 
-                // --- Placeholder routes (later waves fill these in) ---
                 composable(Destination.Stress.route) {
                     StressScreen(
                         vm = viewModel,
-                        onBreathe = { nav.navigateTopLevel(Destination.Breathe.route) },
                     )
                 }
-                composable(Destination.Trends.route) { TrendsScreen(viewModel) }
-                composable(Destination.Insights.route) { InsightsScreen(viewModel, onOpenInsightsHub = { nav.navigateTopLevel(Destination.InsightsHub.route) }) }
-                composable(Destination.Compare.route) { CompareScreen(viewModel) }
                 composable(Destination.Health.route) {
                     HealthScreen(
                         vm = viewModel,
                         onVitalClick = { nav.navigate("vital_detail/$it") },
-                        onOpenLabBook = { nav.navigateTopLevel(Destination.LabBook.route) },
-                        onOpenFusedRecord = { nav.navigateTopLevel(Destination.FusedRecord.route) },
                     )
                 }
-                composable(Destination.Hydration.route) { HydrationScreen(viewModel) }
                 composable(Destination.VitalSigns.route) {
                     VitalSignsScreen(
                         vm = viewModel,
@@ -405,23 +275,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                 // --- v5 pillar screens (Wave 3 wiring) ---
-                composable(Destination.InsightsHub.route) { InsightsHubScreen(viewModel) }
-                composable(Destination.LabBook.route) { LabBookScreen(viewModel) }
-                composable(Destination.Rhythm.route) {
-                    // EXPERIMENTAL: self-gates on its own consent clickwrap (default OFF). The night
-                    // summary + per-window Poincaré results land with the rhythm capture pipeline; until
-                    // then it renders its honest "no clear reading yet" empty state behind the gate.
-                    RhythmScreen(night = null, windows = emptyList())
-                }
-                composable(Destination.FusedRecord.route) { FusedRecordRoute(viewModel) }
-                composable(Destination.AppleHealth.route) { AppleHealthScreen(viewModel) }
-                composable(Destination.Devices.route) {
-                    DevicesScreen(
-                        viewModel,
-                        onUseFileImport = { nav.navigateTopLevel(Destination.DataSources.route) },
-                    )
-                }
-                composable(Destination.DataSources.route) { DataSourcesScreen(viewModel) }
+                composable(Destination.Devices.route) { DevicesScreen(viewModel) }
                 composable(Destination.BackupSync.route) { BackupSyncScreen() }
                 composable(Destination.Notifications.route) { NotificationsSettingsScreen(viewModel) }
                 composable(Destination.Settings.route) {
@@ -429,14 +283,16 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         viewModel,
                         onOpenTestCentre = { nav.navigate(Destination.TestCentre.route) },
                         onOpenBackupSync = { nav.navigate(Destination.BackupSync.route) },
+                        // The old More page was these four destinations' only door. Settings is that door
+                        // now, so these MUST be bound here — they default to no-ops, which is exactly how
+                        // the buttons shipped dead.
+                        onOpenDevices = { nav.navigate(Destination.Devices.route) },
+                        onOpenAlarms = { nav.navigate(Destination.SmartAlarm.route) },
+                        onOpenNotifications = { nav.navigate(Destination.Notifications.route) },
+                        onOpenAutomations = { nav.navigate(Destination.Automations.route) },
                     )
                 }
                 composable(Destination.TestCentre.route) { TestCentreScreen(viewModel) }
-                // The "More" page — the iOS More tab's twin: a navigated ScreenScaffold page hosting the
-                // full grouped destination list (was a pull-up sheet). A row navigates top-level.
-                composable(Destination.More.route) {
-                    MoreScreen(onNavigate = { nav.navigateTopLevel(it) })
-                }
             }
         }
 
@@ -459,41 +315,21 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         modifier = Modifier.padding(start = 16.dp, top = 4.dp, bottom = 6.dp),
                         color = Palette.textTertiary,
                     )
-                    // Updates inbox — relocated here off the Today header (the liquid Today header mirrors iOS,
-                    // which has no notifications bell). The feature is fully intact and one tap away: this row
-                    // opens the same inbox sheet, showing the unread count as a trailing badge.
-                    NavigationDrawerItem(
-                        selected = false,
-                        onClick = {
-                            showQuickActions = false
-                            showUpdatesInbox = true
-                        },
-                        icon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
-                        label = { Text(uiString(R.string.l10n_app_root_updates_c76d1807), style = NoopType.body) },
-                        badge = {
-                            val unread = updateStore.unreadCount
-                            if (unread > 0) {
-                                Text(
-                                    if (unread > 99) "99+" else unread.toString(),
-                                    style = NoopType.captionNumber,
-                                    color = Palette.statusCritical,
-                                )
-                            }
-                        },
-                        colors = NavigationDrawerItemDefaults.colors(
-                            unselectedContainerColor = Palette.surfaceRaised,
-                            unselectedIconColor = Palette.accent,
-                            unselectedTextColor = Palette.textPrimary,
-                        ),
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                    )
                     quickActions.forEach { action ->
                         NavigationDrawerItem(
                             selected = false,
                             onClick = {
                                 showQuickActions = false
-                                if (action.route != currentRoute) {
-                                    nav.navigateTopLevel(action.route)
+                                val route = action.route
+                                if (route == null) {
+                                    // Inline action: ask Day to open the live-session overlay, and make
+                                    // sure Day is what's on screen to receive it.
+                                    viewModel.openLiveSession()
+                                    if (currentRoute != Destination.Today.route) {
+                                        nav.navigateTopLevel(Destination.Today.route)
+                                    }
+                                } else if (route != currentRoute) {
+                                    nav.navigateTopLevel(route)
                                 }
                             },
                             icon = { Icon(action.icon, contentDescription = null) },
@@ -510,171 +346,6 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
             }
         }
 
-        // The Updates inbox (opened by the Today header bell). Presented here so it has the nav for
-        // deep-links — a row's "trends" key switches the bottom tab, mirroring the iOS NavRouter route.
-        if (showUpdatesInbox) {
-            ModalBottomSheet(
-                onDismissRequest = { showUpdatesInbox = false },
-                // Open full-height (no half-pull) so it reads like the iOS Updates sheet, and use the
-                // BEIGE surfaceBase so the white NoopCards POP — surfaceRaised made white cards sit on a
-                // white sheet (no contrast), which is why the Android inbox looked flat vs iOS.
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                containerColor = Palette.surfaceBase,
-                contentColor = Palette.textPrimary,
-            ) {
-                UpdatesInboxScreen(
-                    store = updateStore,
-                    onClose = { showUpdatesInbox = false },
-                    onDeepLink = { key ->
-                        // Map the inbox deep-link key to a route (only known keys route). "trends" is
-                        // the one real poster's target today; unknown keys just close the sheet.
-                        val route = when (key) {
-                            "trends" -> Destination.Trends.route
-                            else -> null
-                        }
-                        if (route != null && route != currentRoute) nav.navigateTopLevel(route)
-                    },
-                    onRestore = { cardId ->
-                        // Flip the shared dismissed flag back off so the card reappears, and signal a
-                        // mounted Today to re-read it immediately (SharedPreferences isn't reactive).
-                        TodayCardDismissal.setDismissed(context, cardId, false)
-                        updateStore.restoreRequest = cardId
-                    },
-                )
-            }
-        }
-    }
-}
-
-// MARK: - More page
-//
-// The "More" tab's destination — a full navigated page (mirroring the iOS More tab's NavigationStack
-// List), replacing the old pull-up ModalBottomSheet. It hosts the SAME grouped destinations
-// ([drawerGroups]) inside a [ScreenScaffold], with the exact section-header + row styling the sheet
-// used (uppercase [Overline] group labels, icon + label [NavigationDrawerItem] rows) — now with a
-// trailing chevron so each row reads as a navigation push, matching the iOS disclosure rows. Tapping a
-// row navigates top-level; there is no sheet to dismiss. The floating bottom bar stays visible because
-// this is just another NavHost destination under the same Scaffold.
-
-/** The full grouped destination list as a navigated page (the iOS More tab's twin). */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun MoreScreen(onNavigate: (String) -> Unit) {
-    // S2 parity: each group's open/closed state, seeded from `defaultExpanded` (Insights + Body open,
-    // Data + App collapsed). PERSISTED (#860 item 2): the user's open/closed choice must survive leaving
-    // and re-entering the More page (and relaunch), not reset to the seed every visit. Backed by
-    // [MoreSectionPrefs] (a CSV of expanded headers in SharedPreferences), mirroring the iOS
-    // @AppStorage("more.expandedSections"). Seeded ONCE from the stored value so first run still shows the
-    // Insights+Body default; every toggle writes through so the next visit reflects the saved state.
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val expanded = remember {
-        val stored = MoreSectionPrefs.read(NoopPrefs.of(context), defaultExpandedHeaders())
-        androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
-            drawerGroups.forEach { put(it.header, stored.contains(it.header)) }
-        }
-    }
-    // Day-cycle sky backdrop + sky-behind-cards, the SAME two gates every other tab honours (Today /
-    // Trends / Sleep / metric detail) — More was the one tab still on the flat canvas, so switching to
-    // it visibly "lost" the theme. SharedPreferences isn't reactive; read once like the other tabs.
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
-    ScreenScaffold(
-        title = uiString(R.string.l10n_app_root_more_4bab2d8f),
-        subtitle = "Everything else, one tap away",
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down.
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
-    ) {
-        // Mirror the iOS More page: each group is a tappable UPPERCASE overline header (with a disclosure
-        // chevron) over a single grouped white NoopCard whose rows are tight (accent icon + title +
-        // chevron) and separated by inset hairlines (NOT loose NavigationDrawerItems on the bare surface).
-        drawerGroups.forEach { group ->
-            val isOpen = expanded[group.header] ?: group.defaultExpanded
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                MoreGroupHeader(
-                    title = stringResource(group.headerRes),
-                    expanded = isOpen,
-                    onToggle = {
-                        expanded[group.header] = !isOpen
-                        // Persist the new open set so the choice survives leaving + re-entering the page
-                        // and relaunch (#860 item 2), mirroring the iOS @AppStorage write.
-                        val open = drawerGroups.map { it.header }.filter { expanded[it] == true }.toSet()
-                        MoreSectionPrefs.write(NoopPrefs.of(context), open)
-                    },
-                )
-                if (isOpen) {
-                    NoopCard(padding = 0.dp) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            group.items.forEachIndexed { i, dest ->
-                                MoreRow(dest = dest, onClick = { onNavigate(dest.route) })
-                                if (i < group.items.lastIndex) {
-                                    HorizontalDivider(
-                                        color = Palette.hairline,
-                                        modifier = Modifier.padding(start = 50.dp),
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** A tappable group header for the More page (S2): the same UPPERCASE [Overline] label as before, now
- *  with a trailing chevron that rotates between open (0deg) and closed (-90deg), mirroring the iOS
- *  collapsible More sections. Tapping toggles the group; the whole row is the tap target. */
-@Composable
-private fun MoreGroupHeader(title: String, expanded: Boolean, onToggle: () -> Unit) {
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 0f else -90f,
-        animationSpec = tween(durationMillis = 240, easing = NavEasing),
-        label = uiString(R.string.l10n_app_root_moregroupchevron_b2b36ec6),
-    )
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onToggle)
-            .semantics {
-                contentDescription = title
-                stateDescription = if (expanded) "Expanded" else "Collapsed"
-            },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Overline(title, modifier = Modifier.weight(1f), color = Palette.textTertiary)
-        Icon(
-            Icons.Filled.ChevronRight,
-            contentDescription = null,
-            tint = Palette.textTertiary,
-            modifier = Modifier
-                .size(Metrics.iconSmall)
-                .rotate(rotation),
-        )
-    }
-}
-
-/** One tappable destination row in the More page — accent icon + title + trailing chevron in a
- *  comfortable tap target, mirroring the iOS MoreRow. */
-@Composable
-private fun MoreRow(dest: Destination, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(dest.icon, contentDescription = null, tint = Palette.accent, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(14.dp))
-        Text(stringResource(dest.titleRes), style = NoopType.body, color = Palette.textPrimary, modifier = Modifier.weight(1f))
-        Icon(
-            Icons.Filled.ChevronRight,
-            contentDescription = null,
-            tint = Palette.textTertiary,
-            modifier = Modifier.size(Metrics.iconSmall),
-        )
     }
 }
 
@@ -693,12 +364,9 @@ private data class BarTab(val dest: Destination, val icon: ImageVector, @StringR
 
 /** The nav slots in iOS order: Today · Trends · Sleep · More.
  *  More is special-cased (it opens the sheet rather than a route), so it is appended at the call site. */
-private val barLeadingTabs = listOf(
+private val barTabs = listOf(
     BarTab(Destination.Today, Icons.Outlined.GridView, R.string.nav_today),
-    // chart.line.uptrend.xyaxis on iOS — the rising-trend glyph, not a flat bar chart.
-    BarTab(Destination.Trends, Icons.AutoMirrored.Filled.TrendingUp, R.string.nav_trends),
-)
-private val barTrailingTabs = listOf(
+    BarTab(Destination.Live, Icons.Filled.FavoriteBorder, R.string.nav_live),
     BarTab(Destination.Sleep, Icons.Filled.Bedtime, R.string.nav_sleep),
 )
 
@@ -740,7 +408,7 @@ private fun GlassBottomBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                barLeadingTabs.forEach { tab ->
+                barTabs.forEach { tab ->
                     BarSlot(
                         icon = tab.icon,
                         label = stringResource(tab.labelRes),
@@ -749,26 +417,6 @@ private fun GlassBottomBar(
                         onClick = { onTabSelected(tab.dest) },
                     )
                 }
-                barTrailingTabs.forEach { tab ->
-                    BarSlot(
-                        icon = tab.icon,
-                        label = stringResource(tab.labelRes),
-                        active = current == tab.dest,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onTabSelected(tab.dest) },
-                    )
-                }
-                BarSlot(
-                    icon = Icons.Filled.MoreHoriz,
-                    label = stringResource(R.string.nav_more),
-                    // Selected on the More page itself, and also kept lit whenever the current screen is
-                    // one reached THROUGH More (i.e. not one of the bar's own three tabs) — so drilling
-                    // into any grouped destination still reads as "you're in More", never "nowhere".
-                    active = current != Destination.Today && current != Destination.Trends &&
-                        current != Destination.Sleep,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onTabSelected(Destination.More) },
-                )
             }
         }
     }
@@ -810,16 +458,16 @@ private fun BarSlot(
     }
 }
 
-/** A centre-FAB quick action: a display title, an icon and the destination route it opens. */
-private data class QuickAction(@StringRes val titleRes: Int, val icon: ImageVector, val route: String)
+/** A centre-FAB quick action: a display title, an icon and the destination route it opens. A null
+ *  [route] means the action is handled inline by the sheet rather than by navigating. */
+private data class QuickAction(@StringRes val titleRes: Int, val icon: ImageVector, val route: String?)
 
 /** The quick actions on the gold centre FAB, each routing to an existing destination. Live HR leads
  *  — it moved off the bottom bar (so the FAB no longer overlaps a tab) but stays one tap away here. */
 private val quickActions: List<QuickAction> = listOf(
-    QuickAction(R.string.action_live_hr, Destination.Live.icon, Destination.Live.route),
     QuickAction(R.string.action_start_workout, Icons.Filled.FitnessCenter, Destination.Workouts.route),
-    QuickAction(R.string.action_log_journal, Icons.Filled.Edit, Destination.Insights.route),
-    QuickAction(R.string.action_breathe, Icons.Filled.Air, Destination.Breathe.route),
+    // No route: raises the one-shot Day consumes to present the live-session overlay.
+    QuickAction(R.string.action_start_session, Icons.Filled.Timeline, null),
 )
 
 // MARK: - Navigation motion (README §Motion)
@@ -838,7 +486,7 @@ private val navFadeSpec = tween<Float>(durationMillis = 240, easing = NavEasing)
  * BrandMark — the NOOP logo glyph at a small in-app size: an OPEN recovery ring (≈80%
  * arc, round caps, starting at −90° / 12 o'clock, clockwise) in the gold gradient with a
  * solid gold core dot at the centre. This is the same brand glyph the RecoveryRing hero
- * carries (the "O" of NOOP), shrunk for the top bar / drawer header so the logo reads in
+ * carries (the "O" of POOP), shrunk for the top bar / drawer header so the logo reads in
  * app. CLEAN/flat per the v3 restraint brief — no bloom, no halo, just the gradient ring.
  * Token-only (gold gradient + hairline track); decorative, so it carries no content label.
  */
@@ -880,22 +528,6 @@ private fun NavHostController.navigateTopLevel(route: String) {
         launchSingleTop = true
         restoreState = true
     }
-}
-
-/**
- * Loader for the v5 "Your Data, Fused" screen: assembles today's [FusedRecord] off the repository via
- * [AppViewModel.fusedRecordForToday] (the pure FusionResolver per metric) and hands the pure
- * [FusedRecordScreen] its read-model. Keeps the screen itself I/O-free + previewable. Re-loads on entry.
- */
-@Composable
-private fun FusedRecordRoute(viewModel: AppViewModel) {
-    var record by remember {
-        mutableStateOf(FusedRecord(rows = emptyList(), dayOwner = null as FusionSource?, contributingSourceCount = 0))
-    }
-    LaunchedEffect(Unit) {
-        record = runCatching { viewModel.fusedRecordForToday() }.getOrDefault(record)
-    }
-    FusedRecordScreen(record = record)
 }
 
 /**

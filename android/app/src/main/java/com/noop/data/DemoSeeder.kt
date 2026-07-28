@@ -29,7 +29,7 @@ object DemoSeeder {
 
     private const val WHOOP = "my-whoop"
     private const val APPLE = "apple-health"
-    // The NOOP-COMPUTED strap source ("<strap>-noop") the IntelligenceEngine persists its derived weekly
+    // The POOP-COMPUTED strap source ("<strap>-noop") the IntelligenceEngine persists its derived weekly
     // scores under (fitness_age / vo2max_est / vitality / body_age). The Health screen + Today "Your cards"
     // + Trends resolve these through the computed UNION (WhoopRepository.metricSeriesComputedUnion), which in
     // the demo (activeStrapId "my-whoop") reads "my-whoop-noop" — so the demo MUST seed them here, not under

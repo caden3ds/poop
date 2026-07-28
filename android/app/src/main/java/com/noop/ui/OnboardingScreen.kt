@@ -8,8 +8,6 @@ import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.health.connect.client.HealthConnectClient
-import androidx.health.connect.client.PermissionController
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -76,9 +74,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.noop.ble.WhoopModel
 import com.noop.data.ImportSummary
-import com.noop.ingest.AppleHealthImporter
-import com.noop.ingest.HealthConnectImporter
-import com.noop.ingest.WhoopCsvImporter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -189,9 +184,7 @@ fun OnboardingScreen(viewModel: AppViewModel, onFinished: () -> Unit) {
                     OnboardingPage.Connect -> ConnectStep(viewModel)
                     OnboardingPage.Bonded -> BondedStep(viewModel)
                     OnboardingPage.Profile -> ProfileStep()
-                    OnboardingPage.Import -> ImportStep(viewModel)
                     OnboardingPage.Notifications -> NotificationsStep()
-                    OnboardingPage.Appearance -> AppearanceStep()
                     OnboardingPage.Done -> DoneStep()
                 }
             }
@@ -227,10 +220,8 @@ private enum class OnboardingPage(val cta: String) {
     Connect("Continue"),
     Bonded("Continue"),
     Profile("Save & continue"),
-    Import("Continue"),
     Notifications("Continue"),
-    Appearance("Continue"),
-    Done("Enter NOOP");
+    Done("Enter POOP");
 }
 
 // MARK: - Shell
@@ -248,7 +239,7 @@ private fun OnboardingTopBar(page: Int, total: Int, progress: Float) {
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Overline("NOOP", color = Palette.accent)
+            Overline("POOP", color = Palette.accent)
             Spacer(Modifier.weight(1f))
             Text(uiString(R.string.l10n_onboarding_screen_page_total_50b38f9a, page, total), style = NoopType.captionNumber, color = Palette.textTertiary)
         }
@@ -426,7 +417,7 @@ private fun ExpectationsStep() {
         subtitle = "A few honest words, so nothing is a surprise.",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-            AppChangelog.expectations.forEach { e ->
+            onboardingExpectations.forEach { e ->
                 ExpectationCard(e)
             }
         }
@@ -437,7 +428,7 @@ private fun ExpectationsStep() {
 private fun BluetoothStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_a_quick_word_before_you_connect_5a29015a),
-        subtitle = "NOOP uses Bluetooth to find your strap. When you continue, allow the permission so it can scan.",
+        subtitle = "POOP uses Bluetooth to find your strap. When you continue, allow the permission so it can scan.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -449,9 +440,9 @@ private fun BluetoothStep() {
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_nothing_leaves_your_phone_502d5d0c),
-                message = "NOOP talks to your strap directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.",
+                message = "POOP talks to your strap directly over Bluetooth Low Energy. There's no server in the middle. The connection is local, and so is every reading it pulls in.",
             )
-            Checkline("When Android asks, allow Bluetooth so NOOP can scan and connect.")
+            Checkline("When Android asks, allow Bluetooth so POOP can scan and connect.")
             Checkline("WHOOP 5.0/MG may need pairing mode the first time, with the official WHOOP app closed.")
         }
     }
@@ -510,7 +501,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
         title = uiString(R.string.l10n_onboarding_screen_find_your_strap_fe460461),
         subtitle = when {
             live.bonded -> "Bonded. You can keep going."
-            bleGranted -> "NOOP starts looking as soon as this step appears. You can keep going while it bonds."
+            bleGranted -> "POOP starts looking as soon as this step appears. You can keep going while it bonds."
             else -> "Allow Bluetooth and tap Scan to find your strap, or keep going and connect later."
         },
     ) {
@@ -596,7 +587,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
                 icon = Icons.Filled.Lock,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_this_can_run_while_you_finish_cd7ef783),
-                message = "If the strap is nearby, NOOP will keep the BLE link alive in the background. You can continue through profile and import while it bonds.",
+                message = "If the strap is nearby, POOP will keep the BLE link alive in the background. You can continue through profile and import while it bonds.",
             )
 
             // WHOOP is NOOP's primary band, so onboarding leads with it — but it isn't required.
@@ -605,8 +596,7 @@ private fun ConnectStep(viewModel: AppViewModel) {
             if (!live.bonded) {
                 Text(
                     uiString(R.string.l10n_onboarding_screen_no_whoop_you_can_still_continue_ec58d88d) +
-                        "or a gym machine under Devices, or import from WHOOP, Apple Health, Oura, Fitbit, Garmin " +
-                        "and more under Data Sources. You can do either any time.",
+                        "or a gym machine under Devices. You can pair one any time.",
                     style = NoopType.footnote,
                     color = Palette.textTertiary,
                     textAlign = TextAlign.Center,
@@ -773,129 +763,10 @@ private fun ProfileStep() {
 }
 
 @Composable
-private fun ImportStep(viewModel: AppViewModel) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    // busy stays transient: a config change / process death cancels the import coroutine,
-    // so a persisted busy=true would strand the buttons disabled with nothing running.
-    var busy by remember { mutableStateOf(false) }
-    var status by rememberSaveable { mutableStateOf<String?>(null) }
-
-    fun runImport(block: suspend () -> ImportSummary) {
-        busy = true
-        status = "Importing…"
-        scope.launch {
-            val summary = withContext(Dispatchers.IO) {
-                runCatching { block() }.getOrElse { ImportSummary.failure("Import", it.message ?: "failed") }
-            }
-            // Import & Data Ingest test mode (Test Centre): emit the parser / per-stage / day-delta trace,
-            // tagged IMPORT, iff the mode is on. Gated zero-cost when off; shared with the Data Sources flow.
-            emitImportTrace(context, viewModel, summary)
-            busy = false
-            status = summary.message
-            Toast.makeText(context, summary.message, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    val whoopImportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) runImport { WhoopCsvImporter.importZip(context, uri, viewModel.repo) } }
-
-    val appleImportLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) runImport { AppleHealthImporter.importExport(context, uri, viewModel.repo) } }
-
-    val hcPermissionLauncher = rememberLauncherForActivityResult(
-        PermissionController.createRequestPermissionResultContract(),
-    ) { granted ->
-        if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
-            runImport { HealthConnectImporter.import(context, viewModel.repo, ProfileStore.from(context).heightCm) }
-        } else {
-            val message = "Health Connect access not granted."
-            status = message
-            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-        }
-    }
-
-    val healthConnectAvailable = remember {
-        HealthConnectImporter.sdkStatus(context) == HealthConnectClient.SDK_AVAILABLE
-    }
-
-    fun startHealthConnect() {
-        scope.launch {
-            val granted = runCatching {
-                HealthConnectImporter.client(context).permissionController.getGrantedPermissions()
-            }.getOrDefault(emptySet())
-            if (granted.any { it in HealthConnectImporter.PERMISSIONS }) {
-                runImport { HealthConnectImporter.import(context, viewModel.repo, ProfileStore.from(context).heightCm) }
-            } else {
-                hcPermissionLauncher.launch(HealthConnectImporter.PERMISSIONS)
-            }
-        }
-    }
-
-    StepShell(
-        title = uiString(R.string.l10n_onboarding_screen_bring_your_history_5b8775c9),
-        subtitle = "Optional: import now, or skip and return to Data Sources later.",
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            IconBadge(icon = Icons.Filled.Storage, tint = Palette.accent, size = 82)
-            InfoCard(
-                icon = Icons.Filled.AutoGraph,
-                tint = Palette.accent,
-                title = uiString(R.string.l10n_onboarding_screen_history_fills_the_dashboard_immediately_9728dde5),
-                message = "A WHOOP export backfills recovery, strain, sleep and workouts. Health Connect can add steps, HR, HRV, sleep and weight from Android sources.",
-            )
-
-            NoopCard(padding = 16.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OnboardingActionButton(
-                        label = uiString(R.string.l10n_onboarding_screen_import_whoop_export_zip_16f4176b),
-                        icon = Icons.Filled.FileUpload,
-                        enabled = !busy,
-                    ) { whoopImportLauncher.launch(arrayOf("*/*")) }
-                    OnboardingActionButton(
-                        label = uiString(R.string.l10n_onboarding_screen_import_from_health_connect_35d55e21),
-                        icon = Icons.Filled.MonitorHeart,
-                        enabled = !busy && healthConnectAvailable,
-                    ) { startHealthConnect() }
-                    OnboardingActionButton(
-                        label = uiString(R.string.l10n_onboarding_screen_import_apple_health_export_077b5624),
-                        icon = Icons.Filled.FavoriteBorder,
-                        enabled = !busy,
-                    ) { appleImportLauncher.launch(arrayOf("*/*")) }
-                }
-            }
-
-            if (!healthConnectAvailable) {
-                Text(
-                    uiString(R.string.l10n_onboarding_screen_health_connect_is_not_available_on_0336b16d),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            status?.let {
-                Text(
-                    it,
-                    style = NoopType.footnote,
-                    color = if (busy) Palette.accent else Palette.textSecondary,
-                    textAlign = TextAlign.Center,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun NotificationsStep() {
     StepShell(
         title = uiString(R.string.l10n_onboarding_screen_stay_in_the_loop_f54254af),
-        subtitle = "NOOP keeps your strap connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
+        subtitle = "POOP keeps your strap connected in the background. When you continue, allow notifications so it can show that link and reach your wrist.",
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -907,93 +778,18 @@ private fun NotificationsStep() {
                 icon = Icons.Filled.Bluetooth,
                 tint = Palette.statusPositive,
                 title = uiString(R.string.l10n_onboarding_screen_a_quiet_ongoing_status_97bf2a44),
-                message = "NOOP holds the Bluetooth link open in the background so your data stays current. One low-priority notification shows it's connected. Nothing noisy.",
+                message = "POOP holds the Bluetooth link open in the background so your data stays current. One low-priority notification shows it's connected. Nothing noisy.",
             )
             Checkline("Wrist alerts (strain nudges and your smart alarm) arrive as notifications too.")
-            Checkline("When Android asks, allow notifications so NOOP can keep you informed.")
+            Checkline("When Android asks, allow notifications so POOP can keep you informed.")
         }
     }
 }
 
 // A late step that tells new users NOOP's look is theirs to set — the same System / Light / Dark
 // choice that lives in Settings → Appearance, with a live preview. Writing the choice flips the whole
-// app immediately (AppearancePrefs.mode is snapshot state; Palette re-resolves live), so the picker
+// app immediately, so the picker
 // IS the preview — and two mini swatches show both the warm-paper Light and dark blue-grey looks.
-@Composable
-private fun AppearanceStep() {
-    val context = LocalContext.current
-    var mode by remember { mutableStateOf(AppearancePrefs.mode) }
-
-    StepShell(
-        title = uiString(R.string.l10n_onboarding_screen_make_it_yours_54135155),
-        subtitle = "NOOP follows your system by default, or pick Light or Dark. You can change this any time in Settings → Appearance.",
-    ) {
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(18.dp),
-        ) {
-            // Two mini look-swatches so the choice is concrete: warm-paper Light and dark blue-grey.
-            // The one matching the live theme carries an accent (blue) rim; System shows whichever
-            // the phone is currently on.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(Metrics.gap),
-            ) {
-                ThemeSwatch(
-                    title = uiString(R.string.l10n_onboarding_screen_light_a36ef8ab),
-                    tokens = LightTokens,
-                    selected = Palette.isLight,
-                    modifier = Modifier.weight(1f),
-                )
-                ThemeSwatch(
-                    title = uiString(R.string.l10n_onboarding_screen_dark_ae1ef014),
-                    tokens = DarkTokens,
-                    selected = !Palette.isLight,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            NoopCard(padding = 18.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    ProfileFieldRow(label = uiString(R.string.l10n_onboarding_screen_theme_a797e309)) {
-                        SegmentedPillControl(
-                            items = listOf(AppearanceMode.SYSTEM, AppearanceMode.LIGHT, AppearanceMode.DARK),
-                            selection = mode,
-                            label = { it.label },
-                            onSelect = {
-                                mode = it
-                                // Persist + flip live — the rest of the onboarding (and the app) re-themes
-                                // instantly, so the user sees their choice land before tapping Continue.
-                                AppearancePrefs.set(context, it)
-                            },
-                        )
-                    }
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Icon(
-                            Icons.Filled.Palette,
-                            contentDescription = null,
-                            tint = Palette.accent,
-                            modifier = Modifier.size(17.dp),
-                        )
-                        Text(
-                            when (mode) {
-                                AppearanceMode.SYSTEM -> "Following your phone's light/dark setting."
-                                AppearanceMode.LIGHT -> "Deep blue accent on warm paper."
-                                AppearanceMode.DARK -> "Deep blue accent on a dark blue-grey canvas."
-                            },
-                            style = NoopType.footnote,
-                            color = Palette.textTertiary,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 /** A small fixed-palette look-swatch (a surface chip + accent ring + hairline) so the user can see a
  *  theme without switching to it. Uses the passed token set directly (not the live Palette) so Light
@@ -1110,8 +906,35 @@ private fun FeatureRow(icon: ImageVector, tint: Color, title: String, body: Stri
     }
 }
 
+/** One honest "what to expect" line on the onboarding step. */
+private data class Expectation(val icon: ImageVector, val title: String, val body: String)
+
+/** What a new user should know before pairing — deliberately short and honest. */
+private val onboardingExpectations: List<Expectation> = listOf(
+    Expectation(
+        Icons.Filled.Sensors,
+        "It reads your strap directly",
+        "Poop talks to the WHOOP over Bluetooth. No WHOOP account, no subscription, no cloud.",
+    ),
+    Expectation(
+        Icons.Filled.Lock,
+        "Everything stays on this phone",
+        "Your data is stored on-device and never uploaded. There is no network permission at all.",
+    ),
+    Expectation(
+        Icons.Filled.AutoGraph,
+        "Scores need a few nights",
+        "Charge, Effort and Rest are personal to you, so they sharpen as it learns your baseline.",
+    ),
+    Expectation(
+        Icons.Filled.MonitorHeart,
+        "Estimates, not medical readings",
+        "Every number is an approximation from consumer sensors. It is not a medical device.",
+    ),
+)
+
 @Composable
-private fun ExpectationCard(e: AppChangelog.Expectation) {
+private fun ExpectationCard(e: Expectation) {
     NoopCard(padding = 14.dp) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(14.dp),

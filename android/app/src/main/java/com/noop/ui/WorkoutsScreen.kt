@@ -230,19 +230,9 @@ fun WorkoutsScreen(vm: AppViewModel) {
     // (This screen previously drew the sky unconditionally - it now matches Today/Trends/Sleep,
     // including turning OFF with the day-cycle setting.) Read once; SharedPreferences isn't reactive.
     val skyCtx = androidx.compose.ui.platform.LocalContext.current
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(skyCtx) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(skyCtx) }
     LazyScreenScaffold(
         title = uiString(R.string.l10n_workouts_screen_workouts_ccb58b22),
         subtitle = "Every session, threaded together.",
-        // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
-        // into the theme canvas behind the header + top rows (bled full-width up behind the status bar via
-        // the scaffold's topBackground plumbing), and the cards float OVER it on the flat surface below. The
-        // Android equivalent of the iOS `ScreenScaffold(topBackground: liquidScaffoldSky())`.
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
-        // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         // Start (or stop) a workout right here, not only on Live — mirrors the Live control (#115).
         item {
@@ -370,7 +360,7 @@ private fun EmptyWorkouts(loaded: Boolean, onAdd: () -> Unit) {
         DataPendingNote(
             title = uiString(R.string.l10n_workouts_screen_no_workouts_yet_85a92042),
             body = "No workouts yet. They come from your WHOOP and Apple Health history. " +
-                "Import in Data Sources to bring them in, or add one you tracked elsewhere.",
+                "Add one you tracked elsewhere, or start a session from the + menu.",
         )
         if (loaded) AddWorkoutButton(onAdd)
     }
@@ -644,18 +634,10 @@ private fun MergeSportDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
 /** #64: the selection key for a row (its natural key), stable across a reload so checkmarks persist. */
 private fun sessionSelectionKey(row: WorkoutRow): String = "${row.startTs}|${row.sport}"
 
-// MARK: - Liquid hero tokens (the liquid Workouts restyle)
-//
-// The frosted card the Effort vessel floats on, mirroring the iOS/Today LiquidTodayView heroCard. `fill`
-// is a translucent near-black (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessel + the
-// white count-up read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge. (These
-// are file-scoped to Workouts — the Today equivalents are private to that file.)
-private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIQUID_HERO_RADIUS: Dp = 26.dp
 
 // MARK: - Effort hero (typical-effort liquid vessel over the day-of-sky)
 //
-// The liquid restyle of the Effort hero: the typical session Effort as a filling LiquidVessel with the
+// The liquid restyle of the Effort hero: the typical session Effort as a filling ScoreRing with the
 // headline number counting up over it (the Today HeroScoreVessel idiom), inside a translucent near-black
 // frosted card that floats over the screen-level liquid sky. The vessel FILL fraction reads the AVERAGE
 // per-session strain on the stored 0–100 Effort axis (scale-independent, so the fill is identical whether
@@ -686,9 +668,8 @@ private fun EffortHero(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
-            .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
-            .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
+            .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface()
             .padding(20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -698,7 +679,7 @@ private fun EffortHero(
             ) {
                 Overline("Typical effort", color = Palette.effortColor)
                 Box(modifier = Modifier.size(140.dp), contentAlignment = Alignment.Center) {
-                    LiquidVessel(
+                    ScoreRing(
                         value = fraction,
                         tint = Palette.effortColor,
                         // Only slosh once a real Effort value is loaded; an empty window poses static + empty.
@@ -1195,14 +1176,14 @@ private fun SessionRow(
                 else -> ". Not selected."
             }
         } else ""
-    // liquidPress on the whole tappable row — it settles inward on press (the iOS LiquidPressStyle feel).
+    // pressable on the whole tappable row — it settles inward on press (the iOS LiquidPressStyle feel).
     // The SAME interactionSource drives the clickable + the press. The edit/delete overflow menu and the
     // selection glyph stay their own hit targets on top.
     val interaction = remember { MutableInteractionSource() }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .liquidPress(interaction)
+            .pressable(interaction)
             .background(background)
             .clickable(
                 interactionSource = interaction,
@@ -1620,7 +1601,7 @@ private fun RecoveryTrendChart(
 
 /**
  * #796 - the workout detail's per-session Effort contribution card. The Effort-amber tinted [NoopCard]
- * carries a "This session" overline, the captured strain as a big count-up value (the NOOP signature),
+ * carries a "This session" overline, the captured strain as a big count-up value (the POOP signature),
  * its scale caption (Effort 0–100 or strain 0–21), and a one-line explainer. Mirrors the iOS
  * WorkoutDetailView.effortCard: same colour world, same count-up, same copy. [strain] is the stored
  * 0–100 Effort value; [effortScale] only changes how it is DISPLAYED, never the stored number.
@@ -2291,4 +2272,29 @@ internal fun sportIcon(sport: String): ImageVector {
         s.contains("basketball") -> Icons.Filled.SportsBasketball
         else -> Icons.Filled.FitnessCenter
     }
+}
+
+/**
+ * Adapter from this screen's rows to [ActivityCostEngine.evaluate]'s two inputs — the "sessions like
+ * this usually cost you N" note (#439).
+ *
+ * This wrapper used to live on the Insights screen, which this fork removed; the ENGINE is untouched,
+ * only its caller moved. Sports are keyed by their DISPLAY name (what the note names back at the user)
+ * and days by the LOCAL calendar day (#277), matching the day keys `DailyMetric.day` already uses so
+ * the engine pairs a session with the right next-morning Charge.
+ */
+private fun computeActivityCosts(
+    rows: List<WorkoutRow>,
+    days: List<com.noop.data.DailyMetric>,
+): List<com.noop.analytics.ActivityCost> {
+    val tzOffset = java.util.TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000L
+    val activityDaysBySport = HashMap<String, MutableSet<String>>()
+    for (row in rows) {
+        val sport = WorkoutEditing.displaySport(row.sport)
+        if (sport.isBlank()) continue
+        activityDaysBySport.getOrPut(sport) { HashSet() }
+            .add(com.noop.analytics.AnalyticsEngine.dayString(row.startTs, tzOffset))
+    }
+    val recoveryByDay = days.mapNotNull { d -> d.recovery?.let { d.day to it } }.toMap()
+    return com.noop.analytics.ActivityCostEngine.evaluate(activityDaysBySport, recoveryByDay)
 }

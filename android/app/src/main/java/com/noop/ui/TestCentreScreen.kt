@@ -409,7 +409,7 @@ private fun ExportCard(vm: AppViewModel, onReport: () -> Unit) {
     SettingsSectionTC(
         icon = Icons.Filled.Upload,
         title = uiString(R.string.l10n_test_centre_screen_export_f3e4fadb),
-        blurb = "Report a bug with your log, or have NOOP drop a daily copy into its export folder.",
+        blurb = "Report a bug with your log, or have POOP drop a daily copy into its export folder.",
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             NoopButton(
@@ -483,7 +483,7 @@ private fun ExperimentalAlgorithmsCard(vm: AppViewModel) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             ToggleRowTC(
                 title = uiString(R.string.l10n_test_centre_screen_hr_from_ppg_sub_lag_interpolation_a3ed1536),
-                description = "When NOOP reconstructs heart rate from the WHOOP 5/MG v26 optical waveform (the " +
+                description = "When POOP reconstructs heart rate from the WHOOP 5/MG v26 optical waveform (the " +
                     "seconds the strap stored no HR), refine the autocorrelation peak with a parabolic sub-lag " +
                     "fit so the estimate is not quantized to roughly 16 bpm steps near a high HR. It only fills " +
                     "seconds the strap never reported; it never overrides a stored HR. 5/MG only, off by default.",

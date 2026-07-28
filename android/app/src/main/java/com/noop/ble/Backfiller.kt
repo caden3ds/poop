@@ -435,7 +435,7 @@ class Backfiller(
                         "Backfill: strap reported ${ev.kind} with an implausible own-timestamp " +
                             "${BadClockDiagnostics.isoDay(ev.rawTs)} (${BadClockDiagnostics.hoursOffset(ev.rawTs, nowForRtc)} " +
                             "vs now) — the strap's RTC reset to a wrong base (#324/#928); this is the ground-truth " +
-                            "cause of the future-dated banking, not a NOOP decode bug.",
+                            "cause of the future-dated banking, not a POOP decode bug.",
                     )
                 }
             }
@@ -665,7 +665,7 @@ class Backfiller(
         fun futureRtcLine(endUnix: Long, wallNowUnix: Long): String {
             val aheadDays = maxOf(0L, endUnix - wallNowUnix) / 86_400L
             return "Backfill: the strap reported a record dated about $aheadDays day(s) in the FUTURE - " +
-                "its clock (RTC) is corrupt, not a NOOP problem. Those records can't be filed onto the " +
+                "its clock (RTC) is corrupt, not a POOP problem. Those records can't be filed onto the " +
                 "right day. Fully charge the strap to 100% and reconnect so it re-syncs its clock; if it " +
                 "persists, forget and re-pair the strap."
         }

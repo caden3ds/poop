@@ -28,7 +28,7 @@ import kotlin.math.round
  *
  * Header strings are byte-identical to a real WHOOP export — the importer normalises them down to
  * keys like `recovery_score_pct`, so they must match exactly. Everything is emitted in UTC with a
- * literal "UTC+00:00" timezone column: NOOP stores epoch seconds and tz-less day strings, so UTC is
+ * literal "UTC+00:00" timezone column: POOP stores epoch seconds and tz-less day strings, so UTC is
  * the only encoding that round-trips a timestamp back to the same instant. A trailing "Source"
  * column (which both parsers provably ignore — they key off named columns, never position) marks
  * on-device computed rows as "noop (APPROXIMATE)" per the house rules. A noop_metric_series.json

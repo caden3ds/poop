@@ -4,10 +4,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Pure-logic coverage for the Today section-order persistence (#today-layout): default order, encode/decode
- * round-trip, reorder, and the never-hide "insert missing section at its default position" invariant. No
- * Android context — these are the pure functions the editor + Today render rely on. Mirrors the macOS
- * TodayLayoutPrefs tests.
+ * Pure-logic coverage for the Today section-order persistence: default order, encode/decode round-trip,
+ * reorder, and the never-hide "insert missing section at its default position" invariant. No Android
+ * context — these are the pure functions the drag-to-arrange editor and the Today render rely on.
+ *
+ * The section set shrank when Synthesis / Your Cards / Start session were removed, so the fixtures below
+ * use surviving sections only. The INVARIANTS are unchanged, and the stale-order cases still matter more
+ * than ever: a layout saved by an older build will contain the removed raw keys, and decoding must drop
+ * them and still yield every current section exactly once.
  */
 class TodayLayoutPrefsTest {
 
@@ -21,52 +25,50 @@ class TodayLayoutPrefsTest {
     @Test
     fun encodeDecode_roundTripsAReorderedList() {
         val reordered = listOf(
-            TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.YOUR_CARDS,
-            TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
+            TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.KEY_METRICS,
             TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
-        assertEquals(
-            "heartRate,hero,yourCards,liveSession,synthesis,keyMetrics,workouts,recoveryVitals,journal",
-            encoded,
-        )
+        assertEquals("heartRate,hero,keyMetrics,workouts,recoveryVitals,journal", encoded)
         assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
     }
 
-    /** The v1 upgrade path: an order saved by the FIRST cut (6 sections — no hero/liveSession, which were
-     *  pinned then) must surface the two new sections at the TOP (their default position), not teleport
-     *  them to the bottom of the user's saved order. */
+    /**
+     * An order saved by an OLDER build carries sections that no longer exist ("synthesis", "yourCards",
+     * "liveSession"). They must be dropped silently, and every surviving section must still appear exactly
+     * once — the upgrade path for anyone who had customised their Today layout before the cull.
+     */
     @Test
-    fun decode_savedOrderFromFirstCut_insertsHeroAndSessionAtTheirDefaultPosition() {
-        val firstCut = "synthesis,keyMetrics,workouts,heartRate,recoveryVitals,yourCards"
+    fun decode_dropsSectionsRemovedInThisFork_andKeepsEveryRemainingOne() {
+        val legacy = "hero,liveSession,synthesis,keyMetrics,workouts,heartRate,recoveryVitals,yourCards,journal"
+        val decoded = TodayLayoutPrefs.decodeOrder(legacy)
+        assertEquals(TodaySection.entries.size, decoded.size)
+        assertEquals(TodaySection.entries.toSet(), decoded.toSet())
+        // The surviving sections keep the relative order the user had saved.
         assertEquals(
             listOf(
-                TodaySection.HERO, TodaySection.LIVE_SESSION,
-                TodaySection.SYNTHESIS, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
-                TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.YOUR_CARDS,
-                // journal(8) follows everything saved → appended:
-                TodaySection.JOURNAL,
+                TodaySection.HERO, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
+                TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
             ),
-            TodayLayoutPrefs.decodeOrder(firstCut),
+            decoded,
         )
     }
 
     @Test
     fun decode_insertsAnyMissingSectionAtItsDefaultPositionRelativeToSaved_neverHides() {
-        // A saved order that omits WORKOUTS + YOUR_CARDS (and the newer hero/liveSession) must still
-        // surface all of them, each before the first saved section that follows it in the default order.
-        val partial = "heartRate,synthesis,keyMetrics,recoveryVitals"
+        // A saved order omitting WORKOUTS must still surface it, before the first saved section that
+        // follows it in the default order.
+        val partial = "heartRate,keyMetrics,recoveryVitals"
         val decoded = TodayLayoutPrefs.decodeOrder(partial)
         assertEquals(TodaySection.entries.size, decoded.size)
         assertEquals(
             listOf(
-                // hero(0), liveSession(1), workouts(4) all precede heartRate(5) in default order, so all
-                // insert before the saved heartRate, in default order among themselves:
-                TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.WORKOUTS,
-                TodaySection.HEART_RATE, TodaySection.SYNTHESIS, TodaySection.KEY_METRICS,
-                TodaySection.RECOVERY_VITALS,
-                // yourCards(7) then journal(8) follow everything saved → appended in default order:
-                TodaySection.YOUR_CARDS, TodaySection.JOURNAL,
+                // hero(0) and workouts(2) both precede heartRate(3) in default order, so both insert
+                // before the saved heartRate, in default order among themselves:
+                TodaySection.HERO, TodaySection.WORKOUTS,
+                TodaySection.HEART_RATE, TodaySection.KEY_METRICS, TodaySection.RECOVERY_VITALS,
+                // journal follows everything saved → appended:
+                TodaySection.JOURNAL,
             ),
             decoded,
         )
@@ -74,20 +76,14 @@ class TodayLayoutPrefsTest {
 
     @Test
     fun decode_dropsUnknownTokensAndCollapsesDuplicates() {
-        val messy = "yourCards,BOGUS,yourCards,heartRate, ,heartRate"
+        val messy = "heartRate,BOGUS,heartRate, ,keyMetrics"
         val decoded = TodayLayoutPrefs.decodeOrder(messy)
         assertEquals(TodaySection.entries.size, decoded.size)
+        assertEquals(TodaySection.entries.toSet(), decoded.toSet())
+        // The saved heartRate→keyMetrics order survives the de-duplication.
         assertEquals(
-            listOf(
-                // Every missing section's default index precedes yourCards(7), so each inserts before it,
-                // accumulating in default order; the saved yourCards→heartRate order is preserved at the end.
-                TodaySection.HERO, TodaySection.LIVE_SESSION, TodaySection.SYNTHESIS,
-                TodaySection.KEY_METRICS, TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS,
-                TodaySection.YOUR_CARDS, TodaySection.HEART_RATE,
-                // journal(8) follows everything → appended last:
-                TodaySection.JOURNAL,
-            ),
-            decoded,
+            decoded.indexOf(TodaySection.HEART_RATE) < decoded.indexOf(TodaySection.KEY_METRICS),
+            true,
         )
     }
 
@@ -97,7 +93,7 @@ class TodayLayoutPrefsTest {
     }
 
     /** defaultOrder must cover EVERY entry: the never-hide merge sorts by default index, so an entry
-     *  missing from the default order could otherwise be dropped or mis-sorted. Twin of the Swift test. */
+     *  missing from the default order could otherwise be dropped or mis-sorted. */
     @Test
     fun defaultOrderCoversEveryEntry() {
         assertEquals(TodaySection.entries.toSet(), TodaySection.defaultOrder.toSet())
@@ -108,12 +104,9 @@ class TodayLayoutPrefsTest {
     fun sectionRawKeysAreStableAndUnique() {
         val raws = TodaySection.entries.map { it.raw }
         assertEquals("raw keys must be unique (they're the persisted identity)", raws.size, raws.toSet().size)
-        // Pin the exact wire strings — they cross the .noopbak boundary and must match macOS byte-for-byte.
+        // Pin the exact wire strings — they are the persisted layout identity.
         assertEquals(
-            listOf(
-                "hero", "liveSession", "synthesis", "keyMetrics",
-                "workouts", "heartRate", "recoveryVitals", "yourCards", "journal",
-            ),
+            listOf("hero", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "journal"),
             raws,
         )
     }

@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Ported from StrandDesign Palette.swift. These XML values back the window/system
-         chrome only; the in-app Compose surfaces use com.noop.ui.NoopTheme colors. -->
-    <color name="surface_base">#FF060A08</color>
-    <color name="surface_raised">#FF0D1512</color>
-    <color name="accent">#FF18C98B</color>
-    <color name="text_primary">#FFF4F7F5</color>
+    <!-- These XML values back the window/system chrome and the widget's non-Compose fallback layout
+         only; every in-app surface is drawn by com.noop.ui.NoopTheme from DarkTokens.
+
+         They MUST stay in step with DarkTokens (com/noop/ui/PaletteTokens.kt). surface_base in
+         particular is the window background the system paints BEFORE the first Compose frame, so a
+         stale value here shows as a colour flash on launch. -->
+    <color name="surface_base">#FF000000</color>
+    <color name="surface_raised">#FF1C1C1E</color>
+    <color name="accent">#FFE6E6EA</color>
+    <color name="text_primary">#FFFFFFFF</color>
+    <color name="text_secondary">#FFB4B4BA</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

@@ -131,7 +131,7 @@ fun WeeklyDigestScreen(vm: AppViewModel) {
         if (digest.isEmpty) {
             DataPendingNote(
                 title = uiString(R.string.l10n_weekly_digest_card_no_readings_this_week_yet_0745a2df),
-                body = "Wear your strap or import your WHOOP export in Data Sources. Once this week has a " +
+                body = "Wear your strap. Once this week has a " +
                     "day or two of data, your week-in-review appears here.",
             )
         } else {

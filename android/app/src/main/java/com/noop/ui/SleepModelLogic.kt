@@ -236,6 +236,7 @@ internal fun buildSleepModel(
 
     return SleepModel(
         stages = stages,
+        asleepMin = asleep.takeIf { it > 0.0 },
         clockLabel = clockLabel(latest, session),
         efficiencyText = efficiency.latest?.let { "${it.roundToInt()}%" } ?: "—",
         performance = performance,

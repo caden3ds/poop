@@ -164,43 +164,22 @@ fun CountUpText(
     )
 }
 
-// MARK: - Staggered appear
+// MARK: - Staggered appear (NO-OP)
 //
-// Fade-in + 8dp rise, sequenced by `index`. Runs ONCE per element (guarded by a saved flag) so
-// re-composition / scroll recycling don't re-trigger it. Reduce Motion → instant, no offset.
+// This was a fade-in + 8dp rise sequenced by `index`, meant to run ONCE per element. Its "run once"
+// guard was a rememberSaveable INSIDE the element — which does not survive a LazyColumn disposing a
+// row that scrolls out of view. So every row replayed its entrance each time it scrolled back in:
+// content visibly faded and slid into place mid-scroll, which reads as lag and as the list jumping
+// backwards. That was the scroll-jank report.
+//
+// Kept as a pass-through rather than deleted so the ~40 call sites stay untouched, and because a
+// per-row entrance animation is the wrong idiom for a scrolling list regardless of how it's guarded.
 
 /**
- * Fade-in + 8dp rise on first appearance, delayed by `index * 40ms` for a sequenced list/grid
- * reveal. Runs ONCE per element. Honours Reduce Motion (appears instantly, no offset). Mirrors
- * iOS `.staggeredAppear(index:)`.
+ * No-op. Returns the receiver unchanged; see the note above.
  *
- * @param index position in the sequence (0 = first / no delay).
- * @param isVisible set `false` to opt an element out (it stays fully shown).
+ * @param index retained for call-site compatibility; unused.
+ * @param isVisible retained for call-site compatibility; unused.
  */
-fun Modifier.staggeredAppear(index: Int, isVisible: Boolean = true): Modifier = composed {
-    val reduced = rememberReduceMotion()
-    // Flips true once we've appeared (or immediately under Reduce Motion). rememberSaveable so a
-    // recompose / config change never replays the entrance.
-    var hasAppeared by rememberSaveable { mutableStateOf(false) }
-
-    val progress by animateFloatAsState(
-        targetValue = if (!isVisible || hasAppeared || reduced) 1f else 0f,
-        animationSpec = if (reduced) tween(0) else NoopMotion.card(),
-        label = uiString(R.string.l10n_noop_motion_staggeredappear_7e1a3335),
-    )
-
-    LaunchedEffect(isVisible, reduced) {
-        if (!isVisible || hasAppeared) return@LaunchedEffect
-        if (reduced) {
-            hasAppeared = true
-        } else {
-            delay((index.coerceAtLeast(0) * NoopMotion.staggerMs).toLong())
-            hasAppeared = true
-        }
-    }
-
-    val rise = with(LocalDensity.current) { NoopMotion.riseOffset.toPx() }
-    this
-        .alpha(if (!isVisible) 1f else progress)
-        .graphicsLayer { translationY = if (!isVisible) 0f else (1f - progress) * rise }
-}
+@Suppress("UNUSED_PARAMETER")
+fun Modifier.staggeredAppear(index: Int, isVisible: Boolean = true): Modifier = this

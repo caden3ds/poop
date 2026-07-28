@@ -24,15 +24,23 @@ internal fun vsTypical(latest: Double?, typical: Double?, suffix: String, decima
     return "$sign$num$suffix vs typical"
 }
 
+// The debt TILE and the debt LEDGER measure DIFFERENT things and must not use the same words for them:
+// the tile is LAST NIGHT's shortfall against need, the ledger is a rolling 14-night SIGNED balance where
+// surplus nights cancel deficit ones. One short night under a fortnight of good ones is legitimately
+// "Below need" last night AND "On target" over the window — but with both phrased identically and
+// stacked on the same screen that reads as the app contradicting itself. The tile now names its scale.
+//
+// Both still share SleepDebt.ON_TARGET_BAND_MIN as the deadband, so they agree on how big a miss has
+// to be before it counts at all.
 internal fun debtCaption(debt: Double?): String {
     if (debt == null) return "vs need"
-    return if (debt < 15.0) "On target" else "Below need"
+    return if (debt < SleepDebt.ON_TARGET_BAND_MIN) "Last night on target" else "Last night below need"
 }
 
 internal fun debtColor(debt: Double?): Color = when {
     debt == null -> Palette.textPrimary
-    debt < 15.0 -> Palette.statusPositive
-    debt < 60.0 -> Palette.statusWarning
+    debt < SleepDebt.ON_TARGET_BAND_MIN -> Palette.statusPositive
+    debt < SleepDebt.ON_TARGET_BAND_MIN * 2 -> Palette.statusWarning
     else -> Palette.statusCritical
 }
 

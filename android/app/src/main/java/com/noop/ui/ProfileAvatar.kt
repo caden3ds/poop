@@ -40,7 +40,7 @@ import java.io.File
 // file in the app-private filesDir; only the file path + an "is set" flag live in SharedPreferences.
 //
 // macOS/iOS parity note: the iOS side keeps the avatar in its ProfileStore as Data on disk. Compose
-// has no OS-reactive store, so — exactly like `AppearancePrefs` / `ChartStylePrefs` in PaletteTokens.kt
+// has no OS-reactive store, so — exactly like the palette prefs in PaletteTokens.kt
 // — the decoded [ImageBitmap] is held in SNAPSHOT state. Every `ProfileAvatarStore.bitmap` read (the
 // Today header avatar, the Settings avatar) recomposes the moment the photo is set or cleared.
 
@@ -251,7 +251,7 @@ fun ProfileAvatar(
 @Composable
 private fun LoopMark(modifier: Modifier = Modifier) {
     val ring = Palette.statusPositive   // recovery / "on" green, a design token (no hardcoded hex)
-    val core = if (Palette.isLight) Palette.textPrimary else Color.White
+    val core = Color.White
     Canvas(modifier = modifier) {
         val stroke = size.minDimension * 0.13f
         val radius = (size.minDimension - stroke) / 2f

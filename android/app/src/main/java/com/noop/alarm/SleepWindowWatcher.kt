@@ -30,6 +30,12 @@ class SleepWindowWatcher(
     /** Set once we've advanced the alarm so we don't keep re-advancing every sample. */
     private var fired: Boolean = false
 
+    /** The lowest smoothed HR seen this night (bpm), or null before any reading landed. Consumed by
+     *  the re-buzz watcher ([RebuzzWatcher.arm]) as the sleep floor "fell back asleep" is judged
+     *  against — exposing it does not change this detector's behaviour in any way. */
+    val nightTroughBpm: Int?
+        get() = if (troughBpm == Int.MAX_VALUE) null else troughBpm
+
     /** Reset for a fresh night (called when the watcher (re)enters a window). */
     fun reset() {
         troughBpm = Int.MAX_VALUE

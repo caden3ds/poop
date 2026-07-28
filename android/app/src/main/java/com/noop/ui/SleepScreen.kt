@@ -42,6 +42,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -137,7 +139,9 @@ fun SleepScreen(
     // Whether the ACTIVE strap is an Oura ring, off the canonical brand table (not an "oura" literal) — so
     // the sleep surfaces name a ring-PROVIDED night's provenance "Oura" and flag its split as the ring's
     // RAW on-device stages. Read/UI only, no stored value. Mirrors macOS Repository.activeDeviceIsOura.
-    val activeIsOura = com.noop.data.DeviceBrandCatalog.isOura(vm.activeStrapId)
+    // WHOOP-only fork: no Oura source exists, so every Oura-specific branch below is inert.
+    // TODO(P7): delete the dead branches when the Sleep screen is restyled.
+    val activeIsOura = false
 
     // PERF (#scroll-jank): the BLE live state ticks ~1Hz. This screen reads `live` ONLY for the
     // "syncing history" note (backfilling + the chunk count), so reading the whole `live` object at
@@ -263,10 +267,8 @@ fun SleepScreen(
     // Day-cycle sky backdrop (#698). Default ON. When off, the screen drops the liquid sky and the
     // scaffold paints the plain dark surface canvas instead — the SAME gate the liquid Today honours.
     // SharedPreferences isn't reactive, so it's read once into local state (mirrors iOS @AppStorage).
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
     // Sky-behind-cards (#434 family): when on, the sky fills the whole viewport so the transparent
     // cards reveal it the whole way down, exactly like Today and the metric-detail screens.
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     // Morning-journal nudge: once per calendar day, when the freshest night ended within the last
     // 12 hours, invite the user to log how they felt. The shown-day is persisted so the sheet never
@@ -395,14 +397,6 @@ fun SleepScreen(
     LazyScreenScaffold(
         title = uiString(R.string.l10n_sleep_screen_sleep_3cac34e6),
         subtitle = "Last night, read in two seconds.",
-        // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the static time-of-day liquid sky
-        // settles into the theme canvas behind the header + hero, bled full-width up behind the status bar
-        // via the scaffold's topBackground plumbing. Gated on the day-cycle preference exactly like Today
-        // (showDayCycleBackground ? sky : plain canvas). Replaces the classic per-hero scene backdrop.
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way down
-        // (Today / metric-detail parity — the same two prefs drive the same two behaviours everywhere).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         // #65: the transient UNDO banner after a suppressing delete. Restores the deleted row into its
         // ORIGINAL namespace + lifts the tombstone. Mirrors the macOS SleepView sleepUndoBanner.
@@ -497,28 +491,30 @@ fun SleepScreen(
                     // fallback to the latest score.
                     score = if (night != null) heroPerformanceScore(night, days, imported)
                             else tilesModel?.performance?.latest,
-                    asleepMin = model?.stages?.asleep,
+                    // The night's recorded total, NOT the stage sum: the stage lookup can miss (a
+                    // manually-logged night, or a session whose end-day key doesn't match) and the
+                    // hero then read "0m asleep" above a timeline that was showing stages.
+                    asleepMin = model?.asleepMin,
                     source = restHeroSource(imported, night?.dayKey ?: days.lastOrNull()?.day, activeIsOura),
                     overline = nightRelativeLabel(nightOffset),
                 )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
-            // SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461, Phase 1). LOGGING ONLY:
-            // a mark is persisted to the `sleep_mark` series + the shareable strap log; it never
-            // changes the detected sleep. Mirrors macOS SleepView.sleepMarkCard.
+            // SLEEP MARKS — tap to log "going to sleep" / "I'm awake" (#461). In the default mode this is
+            // LOGGING ONLY (the `sleep_mark` series + the strap log); in MANUAL-SLEEP-ONLY mode the marks
+            // DEFINE the night: bedtime opens a pending night, wake closes it into a real user-owned
+            // session and the day re-scores (automatic detection is disabled engine-wide). All of that
+            // lives in ONE place — AppViewModel.recordSleepBoundary — shared with the double-tap
+            // automation, and its returned string is the honest toast for what actually happened.
             item {
+            val manualMode = vm.manualSleepOnly.collectAsStateWithLifecycle().value
+            val pendingBedtime = vm.pendingBedtimeMs.collectAsStateWithLifecycle().value
             SleepMarkCard(
                 onMark = { type ->
-                    val mark = SleepMark.now(type)
-                    // The shareable strap log is the human-readable surface in a debug export.
-                    vm.ble.externalLog(mark.logLine())
-                    scope.launch {
-                        runCatching {
-                            vm.repo.upsertMetricSeries(listOf(mark.metricPoint("my-whoop")))
-                        }
-                    }
-                    Toast.makeText(context, mark.confirmation(), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, vm.recordSleepBoundary(type), Toast.LENGTH_LONG).show()
                 },
+                manualMode = manualMode,
+                pendingBedtimeMs = pendingBedtime,
             )
             }
             item { Spacer(Modifier.height(Metrics.selectorTopUp)) }
@@ -656,16 +652,25 @@ fun SleepScreen(
 // SleepView.sleepMarkCard.
 
 @Composable
-private fun SleepMarkCard(onMark: (SleepMarkType) -> Unit) {
+private fun SleepMarkCard(
+    onMark: (SleepMarkType) -> Unit,
+    // Manual-sleep-only mode: when ON, the two buttons DEFINE the night (bedtime opens it, wake closes
+    // it into a real user-owned session) and automatic detection is disabled engine-wide. The MODE
+    // itself is set in Settings → Sleep (it changes how every night is scored, so it belongs with the
+    // settings, not on the screen you glance at); this card owns only the two ACTIONS. The pending
+    // bedtime (epoch ms; 0 = none) is shown BELOW the buttons as live state, so nothing sits between
+    // the card header and the controls.
+    manualMode: Boolean,
+    pendingBedtimeMs: Long,
+) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0), overline = "Tap to log", trailing = "Phase 1")
+        SectionHeader(
+            title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0),
+            overline = "Tap to log",
+            trailing = if (manualMode) "Manual" else "Phase 1",
+        )
         NoopCard(tint = Palette.restColor) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text(
-                    uiString(R.string.l10n_sleep_screen_tap_when_you_re_heading_to_1f401690),
-                    style = NoopType.footnote,
-                    color = Palette.textTertiary,
-                )
                 Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
                     Button(
                         onClick = { onMark(SleepMarkType.BEDTIME) },
@@ -692,6 +697,17 @@ private fun SleepMarkCard(onMark: (SleepMarkType) -> Unit) {
                         Text(uiString(R.string.l10n_sleep_screen_i_m_awake_2caf0e7f), style = NoopType.subhead)
                     }
                 }
+                // Live state only, and BELOW the controls: an open night the user still has to close.
+                // Nothing else sits between the header and the buttons.
+                if (manualMode && pendingBedtimeMs > 0L) {
+                    Text(
+                        "Bedtime marked at " +
+                            java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+                                .format(java.util.Date(pendingBedtimeMs)),
+                        style = NoopType.footnote,
+                        color = Palette.restColor,
+                    )
+                }
             }
         }
     }
@@ -715,7 +731,7 @@ private fun SleepUndoBanner(session: SleepSession, onUndo: () -> Unit) {
     val message = if (session.userEdited) {
         "Sleep deleted."
     } else {
-        "Sleep deleted. NOOP won't detect sleep between $startText and $endText again."
+        "Sleep deleted. POOP won't detect sleep between $startText and $endText again."
     }
     NoopCard(tint = Palette.restColor) {
         Row(
@@ -827,20 +843,11 @@ private fun DeletedSleepWindowsCard(
     }
 }
 
-// MARK: - Liquid hero tokens (the liquid Sleep restyle)
-//
-// The hero card the sleep-performance vessel floats on, ported from the liquid Today (TodayScreen.kt). The
-// fill is a translucent near-black (mock rgba(13,14,20,.80)) so the card floats OVER the day-of-sky and the
-// vessel + white count-up number stay crisp — the CARD does the contrast work, not a muted sky. Radius 26 +
-// a white@0.11 hairline give the frosted-glass edge. Same constants as the liquid Today heroCard.
-private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIQUID_HERO_RADIUS: Dp = 26.dp
 
-// MARK: - 0. REST HERO — liquid sky + sleep-performance vessel (liquid restyle)
+// MARK: - 0. REST HERO — sleep-performance vessel
 //
-// The Rest world's opening, restyled to the liquid pilot: a frosted translucent-black hero card floating on
-// the screen-level liquid sky (the scaffold's topBackground), carrying — when the night has a 0–100
-// sleep-performance score — a [LiquidVessel] filled to score/100 in the Rest colour with the number counting
+// The Rest world's opening: the shared raised card surface carrying — when the night has a 0–100
+// sleep-performance score — a [ScoreRing] filled to score/100 in the Rest colour with the number counting
 // up over it (the Today HeroScoreVessel idiom). No score → the big count-up hours-slept headline. A
 // [SourceBadge] states whether the score is WHOOP's imported figure or NOOP's on-device estimate. The
 // figures, fraction math and Rest tint are UNCHANGED from the BevelGauge this replaced — presentation-only.
@@ -852,13 +859,10 @@ private fun RestHero(score: Double?, asleepMin: Double?, source: String, overlin
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                // The liquid hero CARD: a translucent near-black that floats over the day-of-sky so the
-                // vessel + white count-up number stay crisp. Rounded 26 corner + a faint white hairline give
-                // the frosted-glass edge of the liquid Today heroCard (fill rgba(13,14,20,.80), stroke
-                // white@0.11). Replaces the per-hero night atmosphere (the sky now lives at screen level).
-                .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
-                .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
-                .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS)),
+                // The hero CARD: the shared raised card surface (token fill + hairline), so the vessel and
+                // the count-up number sit on the same material as every other card in the app.
+                .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface(),
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(Metrics.space24),
@@ -903,16 +907,16 @@ private fun RestHero(score: Double?, asleepMin: Double?, source: String, overlin
 
 /**
  * The sleep-performance score as a liquid VESSEL with the value counting up over it — the liquid Sleep hero
- * element, the Today `HeroScoreVessel` idiom. A [LiquidVessel] fills to [fraction] (0..1) in [tint], sized to
+ * element, the Today `HeroScoreVessel` idiom. A [ScoreRing] fills to [fraction] (0..1) in [tint], sized to
  * [diameter]; over it a [CountUpText] rolls the number up to [value] (white, tabular, a soft shadow so it
  * reads on the vessel). The number is hit-transparent (clearAndSetSemantics + no clickable) so a tap falls
- * THROUGH to the vessel — LiquidVessel owns its own tap→splash+haptic. `animated = true`: a real score is
+ * THROUGH to the vessel — ScoreRing owns its own tap→splash+haptic. `animated = true`: a real score is
  * always loaded when this is drawn (the no-score branch shows the hours headline instead).
  */
 @Composable
 private fun SleepHeroVessel(fraction: Double, value: Double, tint: Color, diameter: Dp) {
     Box(modifier = Modifier.size(diameter), contentAlignment = Alignment.Center) {
-        LiquidVessel(
+        ScoreRing(
             value = fraction.coerceIn(0.0, 1.0),
             tint = tint,
             animated = true,
@@ -1001,7 +1005,7 @@ private fun Hero(
                 ?: s.total
             // An Oura night's stages are the ring's RAW on-device SleepNet classification (decoded off the
             // 0x49 phase stream), NOT a NOOP approximation — so it gets its own honest caption instead of the
-            // "approx. stages (on-device)" one that describes NOOP's own sparse-motion staging.
+            // "approx. stages (on-device)" one that describes POOP's own sparse-motion staging.
             val stageCaption = if (activeIsOura) " · raw on-device stages" else " · approx. stages (on-device)"
             val subtitle = "${durationText(inBedMin)} in bed · ${display.efficiencyText} efficiency" +
                 (if (display.realSegments != null) stageCaption else "")
@@ -1174,13 +1178,10 @@ private fun MainSleepFooter(
     activeIsOura: Boolean = false,
 ) {
     val reason = mainSleepReasonText(listOf(main) + naps, habitualMidsleepSec)
-    // C4 — the real merge winner, the SAME wording the By-Day badge uses ("Oura" / "On-device" / "Whoop" /
-    // "Apple Health"), keyed on the main block's source. A persisted Oura night already carries the ring id
-    // (→ "Oura" from daySourceBadge); a night that merely COMPUTED under a live Oura strap reads "On-device"
-    // there, so flip it to "Oura" too, matching iOS SleepView.nightSource (WHOOP/Apple imports still win).
-    val base = daySourceBadge(main.deviceId)
-    val (sourceText, sourceTint) =
-        if (base.first == "On-device" && activeIsOura) "Oura" to Palette.restColor else base
+    // C4 — the real merge winner, the SAME wording the By-Day badge uses ("On-device" / "Whoop" /
+    // "Apple Health"), keyed on the main block's source.
+    val sourceText = provenanceBadgeLabel(dayOwnerSource(main.deviceId)) ?: "On-device"
+    val sourceTint = Palette.textTertiary
     var showWhy by remember(main.startTs) { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space10)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1448,7 +1449,7 @@ private fun StageBreakdownRow(stage: String, minutes: Double, total: Double, col
         // hero card carries many stage rows, so a per-frame slosh per row isn't worth the cost — the tube
         // reads as a filled liquid level, matching the pilot's non-hero tubes. Same fraction the % + the
         // duration carry, so all three agree.
-        LiquidTube(
+        MetricBar(
             frac = fraction,
             tint = color,
             animated = false,
@@ -2323,7 +2324,7 @@ private fun NightNavHeader(
                     if (session.userEdited) {
                         "Removes this sleep and recomputes the day without it. You can undo for a few seconds after."
                     } else {
-                        "Removes this recorded sleep and recomputes the day without it. NOOP won't re-detect sleep in this window. You can undo for a few seconds after."
+                        "Removes this recorded sleep and recomputes the day without it. POOP won't re-detect sleep in this window. You can undo for a few seconds after."
                     },
                     style = NoopType.subhead,
                 )
@@ -2422,7 +2423,9 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
             value = m.sleepDebt.latest?.let { durationText(it) } ?: "—",
             caption = debtCaption(m.sleepDebt.latest),
             accent = debtColor(m.sleepDebt.latest),
-            spark = m.sleepDebt.series, sparkColor = Palette.metricRose,
+            // Tint the trace by the CURRENT debt, like the value and caption above it. It used to be
+            // hardcoded rose, so an on-target night still drew a red line under a green "On target".
+            spark = m.sleepDebt.series, sparkColor = debtColor(m.sleepDebt.latest),
             onClick = { onMetricClick("sleep_debt") },
         )
 
@@ -2452,6 +2455,13 @@ private fun MetricGrid(m: SleepModel, onMetricClick: (String) -> Unit = {}) {
 internal fun SleepDebtLedgerCard(ledger: SleepDebtLedger) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader("Sleep-debt ledger", overline = "Last 14 nights", trailing = "running balance")
+        // Say which scale the verdict below is about. The tile above judges LAST NIGHT; this card judges
+        // the fortnight, and the two can honestly disagree.
+        Text(
+            "Surplus nights cancel deficit ones, so this can read on target even after a short night.",
+            style = NoopType.footnote,
+            color = Palette.textTertiary,
+        )
         NoopCard(padding = Metrics.cardPadding, tint = Palette.restColor) {
             if (ledger.nightCount == 0) {
                 Text(
@@ -2483,8 +2493,13 @@ internal fun SleepDebtLedgerCard(ledger: SleepDebtLedger) {
                         style = NoopType.subhead,
                         color = Palette.textSecondary,
                     )
-                    // Per-night diverging delta bars (surplus up, deficit down).
+                    // Per-night diverging delta bars (surplus up, deficit down), with a legend — the
+                    // strip is meaningless without saying which direction is which.
                     DebtDeltaBars(ledger)
+                    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.space14)) {
+                        DebtBarKey(Palette.statusPositive, "Above need")
+                        DebtBarKey(Palette.statusCritical, "Below need")
+                    }
                     Hairline()
                     ChartFooter(
                         listOf(
@@ -2499,21 +2514,42 @@ internal fun SleepDebtLedgerCard(ledger: SleepDebtLedger) {
     }
 }
 
+/** One legend swatch + label for [DebtDeltaBars]. */
+@Composable
+private fun DebtBarKey(color: Color, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(Metrics.space6),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(color),
+        )
+        Text(label, style = NoopType.footnote, color = Palette.textTertiary)
+    }
+}
+
 /**
- * The diverging per-night delta strip: each night a bar from the centre line — up (accent)
- * for a surplus, down (rose) for a deficit — scaled to the largest |delta|.
+ * The diverging per-night delta strip: each night a bar from the centre line — up for a surplus, down
+ * for a deficit — scaled to the largest |delta|.
+ *
+ * Everything here is sized in DP. It used to size the bars and the zero line in raw pixels, so on a
+ * high-density screen fourteen 60%-of-slot bars sat ~1px apart and the whole strip read as one solid
+ * block of colour rather than a night-by-night chart, with the zero line (1px) invisible behind it.
  */
 @Composable
 private fun DebtDeltaBars(ledger: SleepDebtLedger) {
     val deltas = ledger.nights.map { it.deltaMin }
     val scale = max(deltas.maxOfOrNull { abs(it) } ?: 1.0, 1.0)
-    val accentColor = Palette.accent
-    val deficitColor = Palette.metricRose
-    val centreColor = Palette.hairline
+    val accentColor = Palette.statusPositive
+    val deficitColor = Palette.statusCritical
+    val centreColor = Palette.hairlineStrong
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(64.dp)
             .semantics {
                 contentDescription =
                     uiString(R.string.l10n_sleep_screen_per_night_sleep_balance_ledger_nightcount_f339d0ab, ledger.nightCount, debtSigned(ledger.balanceMin))
@@ -2521,18 +2557,22 @@ private fun DebtDeltaBars(ledger: SleepDebtLedger) {
             .drawBehind {
                 val n = max(deltas.size, 1)
                 val slot = size.width / n
-                val barW = max(2f, slot * 0.6f)
+                // A real gap between bars, so fourteen nights read as fourteen bars.
+                val gap = 3.dp.toPx()
+                val barW = max(2.dp.toPx(), slot - gap)
+                val radius = CornerRadius(2.dp.toPx(), 2.dp.toPx())
                 val midY = size.height / 2f
-                // Centre (zero) line.
+                val minBar = 2.dp.toPx()
+                // Centre (zero) line — the axis every bar is read against, so it has to be visible.
                 drawLine(
                     color = centreColor,
                     start = Offset(0f, midY),
                     end = Offset(size.width, midY),
-                    strokeWidth = 1f,
+                    strokeWidth = 1.dp.toPx(),
                 )
                 deltas.forEachIndexed { i, d ->
                     val frac = (abs(d) / scale).toFloat().coerceIn(0f, 1f)
-                    val h = max(2f, frac * (midY - 2f))
+                    val h = max(minBar, frac * (midY - minBar))
                     val cx = slot * i + slot / 2f
                     // Surplus grows upward from the centre, deficit downward.
                     val top = if (d >= 0.0) midY - h else midY
@@ -2540,7 +2580,7 @@ private fun DebtDeltaBars(ledger: SleepDebtLedger) {
                         color = if (d >= 0.0) accentColor else deficitColor,
                         topLeft = Offset(cx - barW / 2f, top),
                         size = Size(barW, h),
-                        cornerRadius = CornerRadius(2f, 2f),
+                        cornerRadius = radius,
                     )
                 }
             },
@@ -2755,11 +2795,13 @@ private fun TrendLegend(items: List<Pair<String, Color>>) {
 @Composable
 private fun DateAxisRow(days: List<String>) {
     if (days.isEmpty()) return
+    // First / middle / last — DE-DUPLICATED. With one or two nights of data those three picks are the
+    // same day, which printed the identical date three times across the axis as if it spanned a range.
     val labels = listOf(
         days.firstOrNull(),
         days.getOrNull(days.lastIndex / 2),
         days.lastOrNull(),
-    ).map { it?.let(::shortDayLabel).orEmpty() }
+    ).filterNotNull().map(::shortDayLabel).distinct()
     Row(modifier = Modifier.fillMaxWidth()) {
         labels.forEach { label ->
             Text(
@@ -2842,7 +2884,7 @@ private fun SparkTile(
     sparkColor: Color,
     onClick: (() -> Unit)? = null,
 ) {
-    // liquidPress on the tappable tile: it settles inward on press (the pilot's card feel). The SAME
+    // pressable on the tappable tile: it settles inward on press (the pilot's card feel). The SAME
     // interactionSource drives the clickable + the press; indication = null so only the liquid settle shows.
     val interaction = remember { MutableInteractionSource() }
     // heightIn (not height): tileHeight is a floor, matching the Swift StatTile. At normal font scale the
@@ -2850,7 +2892,7 @@ private fun SparkTile(
     val clickMod = if (onClick != null) {
         modifier
             .heightIn(min = Metrics.tileHeight)
-            .liquidPress(interaction)
+            .pressable(interaction)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
     } else {
         modifier.heightIn(min = Metrics.tileHeight)
@@ -2903,7 +2945,7 @@ private fun SparkTile(
 private fun SleepEmptyState() {
     DataPendingNote(
         title = uiString(R.string.l10n_sleep_screen_no_nights_here_yet_607248f5),
-        body = "No nights here yet. Import your WHOOP export in Data Sources to see " +
+        body = "No nights here yet. Wear the strap overnight and your sleep will appear here. " +
             "every night, your sleep stages and trends straight away.",
     )
 }

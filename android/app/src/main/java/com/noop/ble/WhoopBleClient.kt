@@ -57,7 +57,6 @@ import com.noop.analytics.StressOnsetDetector
 import com.noop.analytics.UserProfile
 import com.noop.analytics.WorkoutDetector
 import com.noop.data.NapStore
-import com.noop.ingest.HealthConnectWriter
 import com.noop.notif.InactivityNotifier
 import com.noop.ui.BiofeedbackPrefs
 import com.noop.ui.HrvWindow
@@ -122,6 +121,11 @@ data class LiveState(
      *  short history to render a moving R-R strip / rolling RMSSD. Appended (never replaced) via
      *  [withRRIntervals]; emptied by [clearedBiometrics]. Twin of macOS LiveState.rrRecent (PR#191). */
     val rrRecent: List<Int> = emptyList(),
+    /** Rolling UI buffer of recent heart rates (bpm), capped, oldest dropped first. [heartRate] alone is a
+     *  single instant, so the Live console has no way to draw a trend from it — this is the short history
+     *  the live HR graph plots. Appended (never replaced) via [withHeartRate]; emptied by
+     *  [clearedBiometrics] so a stale trace can't outlive the link. Same idiom as [rrRecent]. */
+    val hrRecent: List<Int> = emptyList(),
     val batteryPct: Double? = null,
     /** Strap battery pack VOLTAGE (mV), decoded from the ~8-min BATTERY_LEVEL event (mv@21/@25) and the
      *  GET_EXTENDED_BATTERY_INFO response (#592). Shown on the Devices card as a "x.xx V" readout beside
@@ -218,10 +222,21 @@ data class LiveState(
         return copy(rr = intervals, rrRecent = capped)
     }
 
+    /** Record a heart rate: sets [heartRate] AND appends to the rolling [hrRecent] graph buffer (oldest
+     *  fall off first). Callers are expected to have already range-gated the value; this only guards
+     *  against a non-positive sentinel reaching the trace. */
+    fun withHeartRate(hr: Int, recentLimit: Int = 120): LiveState {
+        if (hr <= 0) return this
+        val merged = hrRecent + hr
+        val capped = if (merged.size > recentLimit) merged.takeLast(recentLimit) else merged
+        return copy(heartRate = hr, hrRecent = capped)
+    }
+
     /** Blank all live biometric readouts (HR + R-R + the rolling buffer) so a stale heart rate or R-R
      *  strip can't outlive the link. Applied on disconnect alongside the charging/bond clears. Twin of
      *  macOS LiveState.clearBiometrics (PR#191). */
     fun clearedBiometrics(): LiveState = copy(heartRate = null, rr = emptyList(), rrRecent = emptyList(),
+                                              hrRecent = emptyList(),
                                               streamingLiveHR = false)   // #56: a dropped link is no longer streaming
 }
 
@@ -613,6 +628,42 @@ class WhoopBleClient(
         /** How far back the inactivity check reads gravity on each offload completion (4 h comfortably
          *  spans the threshold + re-nudge cadence and a separating Active break for bout continuity). */
         private const val INACTIVITY_LOOKBACK_S = 4 * 3600L
+
+        /** Pulses in the lucid-dream cue. Three is the pattern the daytime half conditions against. */
+        private const val LUCID_PULSE_COUNT = 3
+
+        /**
+         * THE 5/MG CONSTRAINT, which drove this whole design.
+         *
+         * On a WHOOP 5/MG `send()` REPLACES the haptic payload with a fixed "notify" preset
+         * (`[0x01, 47, 152, 0…]`) — so [buzz]'s `loops` argument is DISCARDED. buzz(1), buzz(2) and
+         * buzz(3) all fire the identical preset. Pulse length is therefore not something we can ask
+         * for; the only two levers are HOW MANY presets we fire and HOW FAR APART.
+         *
+         * (This also means the Haptic Clock's long-vs-short digit encoding, which spends the same loop
+         * count, cannot be distinguishing anything on a 5/MG either.)
+         *
+         * A LONG buzz is built by firing the preset [LUCID_SUBWRITES_GENTLE] times [LUCID_SUBWRITE_MS]
+         * apart — fast enough that the motor never settles, so they run together as one sustained buzz.
+         * That merging is exactly what made the first attempt at this feel like a single notification;
+         * here it is used deliberately instead of being fought.
+         */
+        private const val LUCID_SUBWRITE_MS = 120L
+
+        /** Preset writes stacked into one long buzz. */
+        private const val LUCID_SUBWRITES_GENTLE = 3
+
+        /** Salient ramp: a LONGER buzz, since amplitude and loop count are both unavailable. */
+        private const val LUCID_SUBWRITES_SALIENT = 5
+
+        /**
+         * START-TO-START spacing of the three long buzzes (ms).
+         *
+         * Must comfortably exceed one long buzz (~3 × 120 ms of stacked preset plus the preset's own
+         * tail) or the three run together — which is precisely how the first two attempts at this ended
+         * up indistinguishable from a notification. 1600 leaves a clear silence between them.
+         */
+        private const val LUCID_PULSE_SPACING_MS = 1_600L
         /**
          * Idle watchdog: if no genuine offload frame arrives for this long mid-session, end the
          * session (the durable strap_trim cursor means the next session resumes where we left off).
@@ -1042,7 +1093,7 @@ class WhoopBleClient(
                 if (!isWhoop5 && pay.size >= 9) {
                     val mv = (pay[7].toInt() and 0xFF) or ((pay[8].toInt() and 0xFF) shl 8)
                     sb.append("\nVoltage: ").append("%.2f V".format(java.util.Locale.US, mv / 1000.0))
-                        .append("  (mV=").append(mv).append(" @07) — the field NOOP already reads\n")
+                        .append("  (mV=").append(mv).append(" @07) — the field POOP already reads\n")
                 }
                 // Per-byte diff vs the previous capture — the field-mapping signal.
                 sb.append('\n')
@@ -1236,7 +1287,7 @@ class WhoopBleClient(
         fun futureDatedStrapBanner(strapNewestTs: Long?, wallNowUnix: Long): String? =
             if (!isFutureDatedNewest(strapNewestTs, wallNowUnix)) null
             else "Synced, but your strap's clock is set in the future - its banked history is dated ahead of " +
-                "today, so NOOP can't trust those timestamps and didn't import them (importing them would " +
+                "today, so POOP can't trust those timestamps and didn't import them (importing them would " +
                 "misfile your data days or years ahead). Fully charge the strap to 100% and power-cycle it so " +
                 "its clock re-syncs, then reconnect."
 
@@ -1437,7 +1488,7 @@ class WhoopBleClient(
             // paused, so it never sets the flag for a WHOOP. `bonded` stays false (no encrypted bond), so
             // the buzz/alarm/HRV feature gates keep keying off the WHOOP bond. Twin of iOS OuraLiveSource
             // → LiveState.streamingLiveHR (PR #56).
-            _state.update { it.copy(heartRate = hr, connected = true, streamingLiveHR = true) }
+            _state.update { it.withHeartRate(hr).copy(connected = true, streamingLiveHR = true) }
         }
     }
 
@@ -1790,7 +1841,7 @@ class WhoopBleClient(
         // the Swift BLEManager gate. (This client is a process singleton, so init runs once per process.)
         ioScope.launch {
             val rows = rawHistoryArchive.replayIfNeeded(
-                repository, deviceId, com.noop.ui.AppChangelog.CURRENT_VERSION,
+                repository, deviceId, com.noop.BuildConfig.VERSION_NAME,
             )
             if (rows > 0) {
                 log("Backfill: retro-decoded $rows record(s) from the reject archive after an update.")
@@ -1883,8 +1934,8 @@ class WhoopBleClient(
                         // loop just wrote (the "deep sleep window changes nothing" bug).
                         deepHrvWindow = UnitPrefs.hrvWindow(context) == HrvWindow.DEEP_SLEEP,
                         // #691: route the engine's per-day diagnostics (incl. the new RHR floor-vs-mean
-                        // line) into THIS sync's strap log, so a "NOOP RHR reads lower than my sleeping-HR
-                        // app" report carries the proof — the floor (NOOP's WHOOP-style resting HR) beside
+                        // line) into THIS sync's strap log, so a "POOP RHR reads lower than my sleeping-HR
+                        // app" report carries the proof — the floor (POOP's WHOOP-style resting HR) beside
                         // the night MEAN (the other app's number) — from the post-backfill scoring pass, not
                         // only the UI's 15-min loop. log() PII-scrubs at the sink. Best-effort + logging only.
                         diag = { s -> log(s) },
@@ -1894,6 +1945,8 @@ class WhoopBleClient(
                         useExperimentalSleepV2 = PuffinExperiment.from(context).experimentalSleepV2,
                         // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
                         useMotionAwareWake = PuffinExperiment.from(context).motionAwareWake,
+                        // Manual-sleep-only mode: automatic detection off; nights come from the user's marks.
+                        manualSleepOnly = com.noop.ui.NoopPrefs.manualSleepOnly(context),
                         // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route this
                         // post-backfill pass's per-day sleep gate trace into the .sleep-tagged strap log, so a
                         // shared report carries the staging proof from THIS scoring pass too, not only the UI
@@ -1940,13 +1993,6 @@ class WhoopBleClient(
                     // not a scoring failure — rethrow so the cancellation isn't swallowed/mis-logged. (#125)
                     if (it is kotlin.coroutines.cancellation.CancellationException) throw it
                     log("Backfill: post-sync scoring failed: ${it.message}")
-                }
-                // Keep the opt-in Health Connect writeback fresh in background-only operation too.
-                if (NoopPrefs.hcWriteback(context)) {
-                    // #660: log the count AND any PII-safe failure categories (the writer also persists
-                    // the outcome to prefs, so Data Sources surfaces a failing background share).
-                    runCatching { HealthConnectWriter.write(context, repository, deviceId) }
-                        .onSuccess { r -> log("HC writeback: ${r.written} record(s)" + if (r.ok) "" else " (failed: ${r.failures.joinToString()})") }
                 }
             } finally {
                 analyzeAfterBackfillScheduled.set(false)
@@ -2178,7 +2224,7 @@ class WhoopBleClient(
             log("No Bluetooth LE on this device")
             _state.update { it.copy(
                 scanning = false,
-                statusNote = "This device has no Bluetooth LE. NOOP has to run on a real phone with " +
+                statusNote = "This device has no Bluetooth LE. POOP has to run on a real phone with " +
                     "Bluetooth, near your strap. It can't connect from an emulator or virtual device.") }
             return
         }
@@ -2271,8 +2317,8 @@ class WhoopBleClient(
             log("Scan blocked (permission): ${se.message}")
             _state.update { it.copy(
                 scanning = false,
-                statusNote = "NOOP needs the Nearby devices / Bluetooth permission. Allow it in " +
-                    "Settings → Apps → NOOP → Permissions, then tap Connect.") }
+                statusNote = "POOP needs the Nearby devices / Bluetooth permission. Allow it in " +
+                    "Settings → Apps → POOP → Permissions, then tap Connect.") }
             return
         } catch (t: Throwable) {
             scanning = false
@@ -2756,6 +2802,40 @@ class WhoopBleClient(
             val loops = if (pulse.isLong) 2 else 1
             handler.postDelayed({ buzz(loops) }, offsetMs)
             offsetMs += (pulse.durationMs + pulse.gapMs).toLong()
+        }
+    }
+
+    /**
+     * Lucid-dream cue: THREE LONG BUZZES, clearly separated.
+     *
+     * The whole feature depends on this pattern being unmistakable, because the daytime half conditions
+     * the user to respond to it with a reality check. If it can be confused with anything else the motor
+     * does, the conditioning trains the wrong reflex. It is distinct from all of them:
+     *   - a notification is ONE buzz,
+     *   - the wake alarm is the strap's own continuous firmware alarm (dismissed by double-tap),
+     *   - the fall-back-asleep re-buzz is one 3-loop buzz,
+     *   - the Haptic Clock is long/short digit groups with >=450 ms gaps.
+     * Three long, clearly-separated buzzes match none of those.
+     *
+     * [bursts] carries the RAMP as a LONGER buzz. On a 5/MG neither amplitude nor loop count is
+     * available (see the constants), so salience is the only axis there is. See
+     * [LucidCuePolicy.CueStrength].
+     *
+     * Scheduled the same way as the Haptic Clock: the buzz itself is the existing hardware-confirmed
+     * one, only the schedule is new. Timing on the wrist can only be confirmed on a real strap motor.
+     */
+    fun buzzLucidCue(bursts: Int = 1) {
+        val n = bursts.coerceIn(1, 2)
+        val subWrites = if (n >= 2) LUCID_SUBWRITES_SALIENT else LUCID_SUBWRITES_GENTLE
+        log("Lucid cue: 3 long buzzes (subWrites=$subWrites).")
+        var offsetMs = 0L
+        repeat(LUCID_PULSE_COUNT) {
+            // ONE long buzz, synthesised by firing the preset several times in quick succession so the
+            // motor never settles between them. See the constants for why this is the only lever left.
+            repeat(subWrites) { k ->
+                handler.postDelayed({ buzz(1) }, offsetMs + k * LUCID_SUBWRITE_MS)
+            }
+            offsetMs += LUCID_PULSE_SPACING_MS
         }
     }
 
@@ -3950,7 +4030,7 @@ class WhoopBleClient(
                 log("WHOOP 5/MG detected — will send CLIENT_HELLO after subscribing (experimental).")
                 _state.update { it.copy(
                     whoop5Detected = true,
-                    statusNote = "WHOOP 5/MG connected - experimental. After bonding, NOOP brings up live " +
+                    statusNote = "WHOOP 5/MG connected - experimental. After bonding, POOP brings up live " +
                         "heart rate from the strap's realtime stream. Deeper metrics (recovery, strain, " +
                         "sleep) for 5/MG are still being figured out. WHOOP 4.0 is fully supported today.",
                 ) }
@@ -4413,7 +4493,7 @@ class WhoopBleClient(
             "REALTIME_DATA" -> {
                 // Reject 0 / out-of-range spikes; only accept physiologically plausible HR.
                 (parsed.parsed["heart_rate"] as? Int)?.let { hr ->
-                    if (hr in 30..220) _state.update { it.copy(heartRate = hr) }
+                    if (hr in 30..220) _state.update { it.withHeartRate(hr) }
                 }
                 // The realtime stream usually reports rr_count=0; only update R-R when this frame
                 // actually carries intervals, so we don't wipe R-R sourced from the 0x2A37 profile.
@@ -4583,6 +4663,17 @@ class WhoopBleClient(
                             log("Strap fired its smart alarm (event 57) — re-arming the next day's instant")
                             // #34: persist the fire so the debug export's Alarm block shows "last fired".
                             runCatching { NoopPrefs.of(context).edit().putLong("alarm.lastFiredAt", System.currentTimeMillis()).apply() }
+                            // Fall-back-asleep re-buzz: stamp the fire HERE, in the always-running BLE
+                            // layer, NOT only in the AppViewModel callback below. The watcher that decides
+                            // "you fell back asleep" arms off this stamp, and the scenario it exists for is
+                            // the app being CLOSED overnight — exactly when the ViewModel (and therefore
+                            // [onSmartAlarmFired]) does not exist, leaving the stamp unwritten and the
+                            // re-buzz silently dead. The BLE client is owned by NoopApplication and lives
+                            // as long as the foreground service, so stamping here always lands.
+                            runCatching {
+                                com.noop.alarm.SmartAlarmStore.from(context).lastFiredAtMs =
+                                    System.currentTimeMillis()
+                            }
                             onSmartAlarmFired?.invoke()
                         }
                     } else {
@@ -4666,7 +4757,7 @@ class WhoopBleClient(
         if (rr.isNotEmpty()) _state.update { it.withRRIntervals(rr) }
         // HR: accept only physiologically plausible values; reject 0/garbage (off-wrist).
         if (hr in 30..220) {
-            _state.update { it.copy(heartRate = hr) }
+            _state.update { it.withHeartRate(hr) }
             // EXPERIMENTAL WHOOP 5.0/MG: there is no confirmed-write bond for a 5/MG strap, so once
             // live HR actually streams over the standard profile we treat the link as established —
             // otherwise the UI sits on "Connecting…" forever even though data is flowing (issue #8).
@@ -5017,7 +5108,7 @@ class WhoopBleClient(
             // The R22 SET_CONFIG writes go over the encrypted command channel, so the live-HR-only
             // shortcut (bonded true, encryptedBond false on a 5/MG still owned by the official app,
             // #69/#266) can't carry them. Require the genuine bond, or the writes silently fail (#269).
-            log("Deep-data: needs the full encrypted bond, not the live-HR-only link. Close the official WHOOP app, put the strap in pairing mode, and bond it to NOOP first — ignored."); return
+            log("Deep-data: needs the full encrypted bond, not the live-HR-only link. Close the official WHOOP app, put the strap in pairing mode, and bond it to POOP first — ignored."); return
         }
         if (!s.worn) {
             log("Deep-data: the R22 stream is on-wrist only — put the strap ON, then try again."); return

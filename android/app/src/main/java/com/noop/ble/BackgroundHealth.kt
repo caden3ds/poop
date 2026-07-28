@@ -11,7 +11,7 @@ import android.provider.Settings
  * Android background-survival helpers (#386). NOOP already runs a foreground service + exact alarms,
  * but aggressive OEM battery managers kill even those, so the reliable lever is a USER action:
  * whitelist NOOP from battery optimisation (and, on the worst vendors, enable auto-start). This
- * centralises the detection and the intents that fix it, so the Settings "Keep NOOP alive overnight"
+ * centralises the detection and the intents that fix it, so the Settings "Keep POOP alive overnight"
  * toggle and the Test Centre diagnostics share ONE source of truth for the vendor set + exempt check.
  *
  * POPUP DISCIPLINE: nothing here ever fires a system dialog on its own. [batteryExemptionIntent] and

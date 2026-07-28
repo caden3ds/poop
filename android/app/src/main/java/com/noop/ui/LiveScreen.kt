@@ -33,6 +33,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,6 +47,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -71,10 +77,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import com.noop.analytics.HrZones
 import com.noop.analytics.SpotHrvReading
+import com.noop.analytics.StressIndex
 import com.noop.analytics.Sport
 import com.noop.analytics.WorkoutSport
 import com.noop.ble.LiveState
-import com.noop.oura.OuraWearState
 import com.noop.ble.WhoopModel
 
 /**
@@ -84,21 +90,15 @@ import com.noop.ble.WhoopModel
  * on/off as the screen enters/leaves composition.
  */
 
-// MARK: - Liquid hero tokens (the liquid Live restyle)
-//
-// The hero card the live HR vessel floats on, mirroring the liquid Today hero. A translucent near-black
-// (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessel + the white count-up number read
-// crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge. (Twins of the liquid Today
-// LIQUID_HERO_FILL / LIQUID_HERO_RADIUS, redeclared here since those are file-private to TodayScreen.)
-private val LIVE_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIVE_HERO_RADIUS: Dp = 26.dp
 
 @Composable
-fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
+fun LiveScreen(
+    viewModel: AppViewModel,
+    onManageDevices: () -> Unit = {},
+    /** Opens the daily Stress detail — the day-scale context behind the live autonomic readout. */
+    onOpenStress: () -> Unit = {},
+) {
     val live by viewModel.live.collectAsStateWithLifecycle()
-    // #628: the Oura ring's live wear/charge state (null for WHOOP / before evidence). Preferred by the
-    // "Worn" stat below, so removing the ring or putting it on the charger flips it instead of lingering.
-    val ouraWear by viewModel.ouraWearState.collectAsStateWithLifecycle()
     val bpm by viewModel.bpm.collectAsStateWithLifecycle()
     val selectedModel by viewModel.selectedModel.collectAsStateWithLifecycle()
     // Active band name (MW-6) — names the band whose live data the console shows; falls back to "WHOOP".
@@ -112,10 +112,6 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     val unitSystem = UnitPrefs.system(context)
     // Effort display scale (#268) — routes the live + saved workout Effort read-outs. Display-only.
     val effortScale = UnitPrefs.effortScale(context)
-    // Same day-cycle gate as the liquid Today (LiquidScreenSky.kt): the time-of-day sky settles behind the
-    // top content when the user hasn't opted out; otherwise the scaffold paints the plain dark canvas.
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect button
     // REQUESTS it (rather than silently doing nothing), then connects once allowed. Shared with
@@ -153,7 +149,6 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     // and semanticize. The live/bpm body reads are intentionally LEFT as-is (this screen's whole purpose is
     // the live readout); see the report note.
     var showSportPicker by remember { mutableStateOf(false) }
-    var showHrvSnapshot by remember { mutableStateOf(false) }
     // Live workout mode (#238): the full-screen in-exercise overlay. Normally opened at workout START
     // (StartWorkoutSheet); this lets the Today "workout in progress" indicator re-open it for a session
     // already in flight by consuming the ViewModel's one-shot on appear (iOS parity:
@@ -169,28 +164,6 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     // body level so it floats over Live as an overlay regardless of list position (unchanged behaviour).
     if (showSportPicker) {
         StartWorkoutSheet(vm = viewModel, onDismiss = { showSportPicker = false })
-    }
-
-    // Manual HRV snapshot (#127) — a still, seated 60s R-R reading. A plain full-screen Dialog so it floats
-    // over Live; gated on a bonded connection (the reading needs the live R-R stream).
-    if (showHrvSnapshot) {
-        Dialog(
-            onDismissRequest = { showHrvSnapshot = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false),
-        ) {
-            // Tell the reading where its R-R is coming from so the caveat is honest: a WHOOP 5/MG derives
-            // R-R from the optical pulse signal (noisier) while a WHOOP 4 / chest strap is electrical R-R.
-            // Driven off the picked strap model.
-            val hrvSource = when (selectedModel) {
-                WhoopModel.WHOOP5_MG -> SpotHrvReading.Source.OPTICAL_PPG
-                WhoopModel.WHOOP4 -> SpotHrvReading.Source.CHEST_STRAP
-            }
-            HrvSnapshotScreen(
-                viewModel = viewModel,
-                source = hrvSource,
-                onClose = { showHrvSnapshot = false },
-            )
-        }
     }
 
     // The full-screen live-workout overlay (#238). A plain full-screen Dialog so it floats over Live, the
@@ -209,14 +182,6 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
     LazyScreenScaffold(
         title = uiString(R.string.l10n_live_screen_live_body_console_54838e06),
         subtitle = "Current physiology, strap trust, and session controls",
-        // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
-        // behind the header + hero and the cards float over the flat canvas below. Reuses the shared
-        // LiquidScreenSky() slot verbatim; when the day-cycle background is off, the scaffold paints the
-        // plain surface instead (matching the liquid Today's showDayCycleBackground gate).
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
-        // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
 
         // Active band row (MW-6) — names the band the console is reading, with a "Manage devices"
@@ -229,7 +194,7 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         // Console header — the pill + a connection-mode badge (+ a live SYNCING badge during a history
         // offload), with battery / worn / last-sync stats. Mirrors the macOS consoleHeader.
         item {
-        ConsoleHeader(live = live, activeConnection = activeConnection, ouraWear = ouraWear)
+        ConsoleHeader(live = live, activeConnection = activeConnection)
         }
 
         // Primary Connect affordance, surfaced ABOVE the fold whenever there's no link — the real
@@ -335,6 +300,13 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
         // Body console — focal live HR VESSEL + live physiology (R-R thread, rolling RMSSD, frame/event).
         item {
         BodyConsole(live = live, bpm = bpm, activeConnection = activeConnection, zone = liveZone, hrMax = profile.hrMax)
+        }
+
+        // Autonomic console — live HRV and live stress off the SAME R-R stream the HR console is already
+        // pulling. No button, no protocol, no "start a reading" prompt: the Live tab arms the realtime
+        // stream on entry (LaunchedEffect above), so these are simply on whenever this tab is open.
+        item {
+        AutonomicConsole(live = live, activeConnection = activeConnection, onOpenStress = onOpenStress)
         }
 
         // Signal Trust rail — one tile per signal that has to be current for the console to be trusted.
@@ -458,25 +430,6 @@ fun LiveScreen(viewModel: AppViewModel, onManageDevices: () -> Unit = {}) {
                 row.routePolyline?.let { RouteCanvas(it, modifier = Modifier.padding(top = 8.dp)) }
             }
 
-            // Manual HRV snapshot (#127) — a still, seated 60s R-R reading. Needs the live R-R stream,
-            // so it's gated on a bonded connection just like the workout/refresh actions above.
-            OutlinedButton(
-                onClick = { showHrvSnapshot = true },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = activeConnection,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.restBright),
-            ) {
-                Icon(
-                    Icons.Filled.MonitorHeart,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp).padding(end = 4.dp),
-                )
-                Text(
-                    uiString(R.string.l10n_live_screen_take_an_hrv_reading_20ecb2d2), style = NoopType.captionNumber,
-                    maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
-                )
-            }
         }
         }
         }
@@ -715,14 +668,14 @@ private fun ActiveBandRow(name: String, onManageDevices: () -> Unit) {
                 Overline("Active band")
                 Text(name, style = NoopType.headline, color = Palette.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            // liquidPress: the "Manage devices" affordance settles inward on press (the iOS LiquidPressStyle
+            // pressable: the "Manage devices" affordance settles inward on press (the iOS LiquidPressStyle
             // feel), the SAME interactionSource driving its clickable + the press response.
             val manageInteraction = remember { MutableInteractionSource() }
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(RoundedCornerShape(8.dp))
-                    .liquidPress(manageInteraction)
+                    .pressable(manageInteraction)
                     .clickable(
                         interactionSource = manageInteraction,
                         indication = null,
@@ -744,7 +697,7 @@ private fun ActiveBandRow(name: String, onManageDevices: () -> Unit) {
 }
 
 @Composable
-private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: OuraWearState? = null) {
+private fun ConsoleHeader(live: LiveState, activeConnection: Boolean) {
     NoopCard(padding = 14.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Badges row — pill + connection-mode badge + a live SYNCING badge during an offload.
@@ -781,7 +734,6 @@ private fun ConsoleHeader(live: LiveState, activeConnection: Boolean, ouraWear: 
                     live.batteryPct?.let { "${it.toInt()}%" } ?: "—",
                     charging = live.charging == true,
                 )
-                HeaderStat("Worn", wornLabel(live, activeConnection, ouraWear))
                 HeaderStat("Last sync", lastSyncLabel(live))
             }
         }
@@ -876,21 +828,6 @@ private fun OfflineConnectCallout(scanning: Boolean, onConnect: () -> Unit) {
  *  iOS LiveView.ringStreaming. */
 private fun ringStreaming(live: LiveState): Boolean = live.connected && live.streamingLiveHR
 
-/** The "Worn" stat text. An Oura ring reports a precise live wear/charge state (live-HR presence + charger
- *  STATE + a removal watchdog), so prefer it — it flips to not-worn the moment the ring is off the finger
- *  or on the charger, unlike the WHOOP wrist boolean which lingers. WHOOP has no such signal ([ouraWear]
- *  stays null) so it keeps the wrist-event read. "—" off a live link; because an Oura ring streams WITHOUT
- *  bonding, a live stream counts as a link too (not just [activeConnection]). Mirrors iOS LiveView.wornNow
- *  (#628 / #218). */
-private fun wornLabel(live: LiveState, activeConnection: Boolean, ouraWear: OuraWearState?): String {
-    val liveLink = activeConnection || ringStreaming(live)
-    return when {
-        !liveLink -> "—"
-        ouraWear != null -> if (ouraWear == OuraWearState.WORN) "Yes" else "No"
-        else -> if (live.worn) "Yes" else "No"
-    }
-}
-
 private fun connectionModeBadge(live: LiveState, activeConnection: Boolean): String = when {
     activeConnection && live.encryptedBond -> "FULL BOND"
     activeConnection -> "LIVE HR ONLY"
@@ -918,16 +855,15 @@ private fun lastSyncLabel(live: LiveState): String =
 
 @Composable
 private fun BodyConsole(live: LiveState, bpm: Int?, activeConnection: Boolean, zone: Int, hrMax: Int) {
-    // The liquid hero CARD: a translucent near-black that floats over the day-of-sky so the HR vessel + the
+    // The hero CARD: the shared raised card surface (token fill + hairline), so the HR vessel + the
     // white count-up number stay crisp — the card does the contrast work, not a muted sky. A rounded 26
     // corner + a faint white hairline give it the frosted-glass edge of the liquid Today heroCard
     // (heroFill = rgba(13,14,20,.80), stroke white@0.11). Mirrors the pilot LiquidTodayView heroCard.
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(LIVE_HERO_RADIUS))
-            .background(LIVE_HERO_FILL.copy(alpha = LIVE_HERO_FILL.alpha * CardAppearance.opacity))
-            .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIVE_HERO_RADIUS))
+            .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface()
             .padding(20.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
@@ -953,7 +889,7 @@ private fun HeartReadout(live: LiveState, bpm: Int?, activeConnection: Boolean, 
         else -> Palette.effortColor
     }
     // The vessel fill: current bpm as a fraction of the age-based max HR (the same hrMax the zone model
-    // above uses). Null bpm → empty vessel. Clamped 0..1 by LiquidVessel at the draw call.
+    // above uses). Null bpm → empty vessel. Clamped 0..1 by ScoreRing at the draw call.
     val fraction = bpm?.let { (it.toDouble() / hrMax.toDouble()) } ?: 0.0
 
     Column(
@@ -971,7 +907,7 @@ private fun HeartReadout(live: LiveState, bpm: Int?, activeConnection: Boolean, 
             // The live HR GAUGE as a liquid VESSEL — fills to bpm/hrMax in the zone tint, sloshing live once
             // a real HR is streaming (animated only when bpm != null, so an idle console poses static and
             // doesn't churn an empty canvas). Mirrors the liquid Today HeroScoreVessel idiom.
-            LiquidVessel(
+            ScoreRing(
                 value = fraction,
                 tint = tint,
                 animated = bpm != null,
@@ -1002,6 +938,16 @@ private fun HeartReadout(live: LiveState, bpm: Int?, activeConnection: Boolean, 
                     Text(uiString(R.string.l10n_live_screen_zone_zone_b8e9c0f9, zone), style = NoopType.overline, color = tint)
                 }
             }
+        }
+        // The trend the single number can't show: recent HR over time, straight off the rolling buffer the
+        // BLE client fills. Only drawn once there are enough points for a line to MEAN something — two
+        // samples is a segment, not a trend, and an almost-empty axis reads as data that isn't there.
+        if (live.hrRecent.size >= HR_GRAPH_MIN_POINTS) {
+            HrGraph(
+                samples = live.hrRecent,
+                tint = tint,
+                modifier = Modifier.fillMaxWidth().height(72.dp),
+            )
         }
         Text(
             signalTrustSummary(live, activeConnection),
@@ -1057,8 +1003,8 @@ private fun RRStrip(rrRecent: List<Int>) {
     val values = rrRecent.takeLast(18)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (values.size >= 2) {
-            // Live thread — flows (glint + pulse) as new intervals land. Heart-pink (LiquidThread default).
-            LiquidThread(
+            // Live thread — flows (glint + pulse) as new intervals land. Heart-pink (MetricTrace default).
+            MetricTrace(
                 bpm = values.map { it.toDouble() },
                 animated = true,
                 height = 58.dp,
@@ -1118,13 +1064,198 @@ private fun LiveProofMetric(modifier: Modifier, label: String, value: String, ti
     }
 }
 
+/** Points required before the live HR graph draws at all — below this a line is noise, not a trend. */
+private const val HR_GRAPH_MIN_POINTS = 6
+
+/**
+ * Live heart-rate trace over [samples] (bpm, oldest → newest) from [LiveState.hrRecent].
+ *
+ * Self-scaling on the actual range in view, padded so a flat resting trace doesn't render as a
+ * meaningless full-amplitude zigzag: when the spread is smaller than [HR_GRAPH_MIN_SPAN] bpm the axis is
+ * widened to that minimum and the line sits flat, which is the truth of what the strap is reading.
+ * Endpoints are labelled so the trace carries its own scale — an unlabelled sparkline can be read as any
+ * magnitude at all.
+ */
+@Composable
+private fun HrGraph(samples: List<Int>, tint: Color, modifier: Modifier = Modifier) {
+    val lo = samples.min()
+    val hi = samples.max()
+    // Widen a too-narrow window around its midpoint so the drawn amplitude stays honest.
+    val mid = (lo + hi) / 2.0
+    val half = maxOf((hi - lo) / 2.0, HR_GRAPH_MIN_SPAN / 2.0)
+    val axisLo = mid - half
+    val axisHi = mid + half
+    val span = (axisHi - axisLo).coerceAtLeast(1.0)
+
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = modifier) {
+        Canvas(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            val stepX = if (samples.size > 1) size.width / (samples.size - 1) else 0f
+            fun yFor(v: Int): Float =
+                (size.height * (1.0 - ((v - axisLo) / span))).toFloat().coerceIn(0f, size.height)
+
+            val path = Path()
+            samples.forEachIndexed { i, v ->
+                val x = i * stepX
+                val y = yFor(v)
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            // Soft fill under the line, then the line itself — the same visual weight as MetricTrace.
+            val fill = Path().apply {
+                addPath(path)
+                lineTo(size.width, size.height)
+                lineTo(0f, size.height)
+                close()
+            }
+            drawPath(
+                fill,
+                brush = Brush.verticalGradient(
+                    listOf(tint.copy(alpha = 0.22f), tint.copy(alpha = 0f)),
+                ),
+            )
+            drawPath(path, color = tint, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            // Head dot: where the trace is right now.
+            drawCircle(
+                color = tint,
+                radius = 3.dp.toPx(),
+                center = Offset(size.width, yFor(samples.last())),
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                "${axisLo.roundToInt()}",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "${axisHi.roundToInt()}",
+                style = NoopType.footnote,
+                color = Palette.textTertiary,
+            )
+        }
+    }
+}
+
+/** Minimum bpm window the HR graph will scale to, so a flat trace renders flat rather than as noise. */
+private const val HR_GRAPH_MIN_SPAN = 12.0
+
+// MARK: - Autonomic console (live HRV + live stress)
+
+/**
+ * Live HRV and live stress, both derived from [LiveState.rrRecent] — the rolling beat-to-beat buffer the
+ * realtime stream fills while this tab is open.
+ *
+ * Both readouts run the app's canonical, already-tested math rather than a view-local approximation:
+ *  - HRV is [SpotHrvReading.compute], the same cleaning pipeline and (n-1) RMSSD denominator the nightly
+ *    `avgHrv` uses, so a live number is directly comparable to the overnight one.
+ *  - Stress is [StressIndex.stressIndexRaw] (Baevsky SI). SI is the right primitive for a LIVE readout
+ *    because it is computed from the shape of the current R-R histogram alone — unlike the daily Stress
+ *    score it needs no personal baseline or history, so it is meaningful from the first clean window.
+ *
+ * Honesty: a thin or noisy window yields "—" plus the surviving-beat count, never an interpolated value.
+ * Both metrics need enough clean beats; until then this says so instead of showing a number.
+ */
+@Composable
+private fun AutonomicConsole(live: LiveState, activeConnection: Boolean, onOpenStress: () -> Unit) {
+    val rr = live.rrRecent
+    val hrv = remember(rr) { SpotHrvReading.compute(rr) }
+    val si = remember(rr) { StressIndex.componentsRaw(rr.map { it.toDouble() }) }
+    val reading = hrv as? SpotHrvReading.Outcome.Reading
+    val insufficient = hrv as? SpotHrvReading.Outcome.Insufficient
+
+    NoopCard(tint = Palette.restBright) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    uiString(R.string.live_autonomic_title),
+                    style = NoopType.overline,
+                    color = Palette.textTertiary,
+                )
+                Spacer(Modifier.weight(1f))
+                // Beat counter: the one number that explains WHY the readouts are blank when they are.
+                Text(
+                    uiString(R.string.live_autonomic_beats, rr.size),
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            // The live readout is an instant; the day is the context. One tap through to the daily Stress
+            // detail (hourly timeline, trend, methodology) rather than duplicating any of it here.
+            TextButton(
+                onClick = onOpenStress,
+                contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
+            ) {
+                Text(
+                    uiString(R.string.live_autonomic_open_day),
+                    style = NoopType.footnote,
+                    color = Palette.accent,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                LiveProofMetric(
+                    modifier = Modifier.weight(1f),
+                    label = uiString(R.string.live_autonomic_hrv),
+                    value = reading?.let { "${it.rmssdMs.roundToInt()} ms" } ?: "—",
+                    tint = Palette.restBright,
+                    offline = reading == null,
+                )
+                LiveProofMetric(
+                    modifier = Modifier.weight(1f),
+                    label = uiString(R.string.live_autonomic_stress),
+                    value = si?.let { "${it.si.roundToInt()}" } ?: "—",
+                    tint = siTint(si?.si),
+                    offline = si == null,
+                )
+                LiveProofMetric(
+                    modifier = Modifier.weight(1f),
+                    label = uiString(R.string.live_autonomic_balance),
+                    value = si?.let { siBandLabel(it.si) } ?: "—",
+                    tint = siTint(si?.si),
+                    offline = si == null,
+                )
+            }
+            // One line of state, and only when there IS something to explain.
+            val note = when {
+                !activeConnection -> uiString(R.string.live_autonomic_needs_link)
+                reading == null && insufficient != null ->
+                    uiString(R.string.live_autonomic_building, insufficient.clean, insufficient.needed)
+                else -> null
+            }
+            if (note != null) {
+                Text(note, style = NoopType.footnote, color = Palette.textSecondary)
+            }
+        }
+    }
+}
+
+/**
+ * Baevsky SI band label. The conventional reading of SI (dimensionless): roughly under 50 is a broad,
+ * vagally-dominant histogram; 50-150 is the usual resting range; 150-500 is sympathetically shifted; above
+ * 500 is marked sympathetic dominance. APPROXIMATE and non-clinical, like every physiological readout here
+ * — the bands orient the raw number, they do not diagnose anything.
+ */
+internal fun siBandLabel(si: Double): String = when {
+    si < 50 -> "Relaxed"
+    si < 150 -> "Balanced"
+    si < 500 -> "Elevated"
+    else -> "High"
+}
+
+private fun siTint(si: Double?): Color = when {
+    si == null -> Palette.textTertiary
+    si < 50 -> Palette.statusPositive
+    si < 150 -> Palette.restBright
+    si < 500 -> Palette.statusWarning
+    else -> Palette.statusCritical
+}
+
 // MARK: - Signal Trust rail
 
 @Composable
 private fun SignalTrustRail(live: LiveState, bpm: Int?, activeConnection: Boolean) {
     val tiles = signalTiles(live, bpm, activeConnection)
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
-        SectionHeader(title = uiString(R.string.l10n_live_screen_signal_trust_4a91fe00), overline = "Proof that the console is current")
+        SectionHeader(title = uiString(R.string.l10n_live_screen_signal_trust_4a91fe00))
         // Two tiles per row (a LazyVerticalGrid can't live inside the scrolling ScreenScaffold —
         // infinite-height constraints — so use fixed Rows, the correct Compose idiom here).
         tiles.chunked(2).forEach { rowTiles ->
@@ -1160,22 +1291,6 @@ private fun signalTiles(live: LiveState, bpm: Int?, activeConnection: Boolean): 
         if (live.rrRecent.isEmpty()) Palette.textTertiary else Palette.metricCyan,
     ),
     SignalTile(
-        "Connection",
-        when {
-            activeConnection && live.encryptedBond -> "Encrypted"
-            activeConnection -> "Partial"
-            ringStreaming(live) -> "Streaming"
-            live.connected -> "Connected"
-            else -> "Offline"
-        },
-        when {
-            activeConnection && live.encryptedBond -> "Controls unlocked"
-            ringStreaming(live) -> "Live stream, no WHOOP bond"
-            else -> "Standard HR is not a full bond"
-        },
-        connectionModeColor(live, activeConnection),
-    ),
-    SignalTile(
         "History sync",
         if (live.backfilling) "${live.syncChunksThisSession} chunks" else lastSyncLabel(live),
         when {
@@ -1191,19 +1306,6 @@ private fun signalTiles(live: LiveState, bpm: Int?, activeConnection: Boolean): 
         live.batteryPct?.let { "${it.toInt()}%" } ?: "Unknown",
         if (live.charging == true) "Charging" else "Last reported by strap",
         batteryTint(live.batteryPct),
-    ),
-    // Wear is only trustworthy on a live link: `worn` defaults true and is only updated by
-    // WRIST_ON/OFF events, so while OFFLINE it would read a false-green "On wrist". Gate value + tint
-    // on activeConnection (triage fix for PR#191, parity with the macOS Wear tile).
-    SignalTile(
-        "Wear state",
-        if (activeConnection) (if (live.worn) "On wrist" else "Off wrist") else "Unknown",
-        if (activeConnection) (if (live.worn) "Eligible for live physiology" else "Wear the strap for scoring") else "Connect to read wear state",
-        when {
-            !activeConnection -> Palette.textTertiary
-            live.worn -> Palette.accent
-            else -> Palette.statusWarning
-        },
     ),
 )
 

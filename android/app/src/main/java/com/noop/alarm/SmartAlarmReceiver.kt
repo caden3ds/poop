@@ -38,6 +38,10 @@ class SmartAlarmReceiver : BroadcastReceiver() {
         val store = SmartAlarmStore.from(context)
         store.scheduledDeadlineMs = 0L
         store.scheduledWindowStartMs = 0L
+        // Stamp the fire so the BLE service's re-buzz watcher (wake again if the user falls back
+        // asleep) can arm off it. A stamp is written even when the re-buzz toggle is off — the
+        // collector gates on the toggle, and a bare timestamp is harmless.
+        store.lastFiredAtMs = System.currentTimeMillis()
         // ...then, if the alarm is still enabled, re-arm the GUARANTEED deadline for the NEXT day so
         // the smart alarm recurs each morning. `afterFire = true` forces tomorrow even on the EARLY
         // (light-sleep) fire path, where today's hard deadline is still in the future and a plain
@@ -91,7 +95,7 @@ class SmartAlarmReceiver : BroadcastReceiver() {
                 "Smart alarm",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "The phone wake alarm NOOP fires inside your chosen wake window."
+                description = "The phone wake alarm POOP fires inside your chosen wake window."
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 600, 400, 600, 400, 600)
                 setBypassDnd(true)   // a wake alarm should sound through Do Not Disturb

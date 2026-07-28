@@ -3,12 +3,16 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!--
-      NOOP is an OFFLINE WHOOP companion. It talks to the strap over BLE and stores
-      everything locally (Room). The ONLY outbound network is the opt-in AI Coach
-      (bring-your-own OpenAI/Anthropic key) — nothing is sent unless the user adds a
-      key and asks a question. Hence the single INTERNET permission below.
+      Poop is a FULLY OFFLINE WHOOP companion. It talks to the strap over BLE and stores
+      everything locally (Room). There is NO network permission at all — no INTERNET, and
+      nothing to send data anywhere with. Keep it that way.
     -->
-    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- WorkManager's manifest declares ACCESS_NETWORK_STATE for network-constrained jobs. Poop has
+         no network feature and no worker uses a network constraint, so strip it at merge time: the
+         shipped APK must declare NO network permission of any kind. If a future worker ever needs a
+         network constraint this removal is what will fail loudly first — that is intentional. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <!-- Android 12+ (API 31+) Bluetooth runtime permissions.
          neverForLocation: we do not derive physical location from BLE scans, so we
@@ -83,43 +87,7 @@
         android:name="android.hardware.bluetooth_le"
         android:required="true" />
 
-    <!-- Health Connect (optional): read-only access to the user's own health data so it can
-         be imported on-device. Nothing is uploaded. Granted at runtime, revocable any time. -->
-    <uses-permission android:name="android.permission.health.READ_STEPS" />
-    <uses-permission android:name="android.permission.health.READ_TOTAL_CALORIES_BURNED" />
-    <uses-permission android:name="android.permission.health.READ_ACTIVE_CALORIES_BURNED" />
-    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
-    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
-    <uses-permission android:name="android.permission.health.READ_HEART_RATE_VARIABILITY" />
-    <uses-permission android:name="android.permission.health.READ_SLEEP" />
-    <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
-    <uses-permission android:name="android.permission.health.READ_RESPIRATORY_RATE" />
-    <!-- Health Connect writeback (optional, opt-in, default OFF): lets NOOP contribute its
-         on-device computed nightly metrics so other apps can read them. Only what NOOP itself
-         computed from the strap is written — imported data is never echoed back. -->
-    <uses-permission android:name="android.permission.health.WRITE_RESTING_HEART_RATE" />
-    <uses-permission android:name="android.permission.health.WRITE_HEART_RATE_VARIABILITY" />
-    <uses-permission android:name="android.permission.health.WRITE_OXYGEN_SATURATION" />
-    <uses-permission android:name="android.permission.health.WRITE_RESPIRATORY_RATE" />
-    <!-- HR samples and sleep writeback (#528, opt-in, default OFF). Steps + active-calories are
-         deliberately NOT written back (they'd double-count the phone/watch's authoritative totals — see
-         HealthConnectWriter.kt; iOS #249 aligns), so their WRITE permissions are intentionally NOT
-         declared here — the writer's WRITE_RECORDS set never requests them (#659). -->
-    <uses-permission android:name="android.permission.health.WRITE_HEART_RATE" />
-    <uses-permission android:name="android.permission.health.WRITE_SLEEP" />
-    <!-- Exercise-session + distance writeback (GPS workouts, opt-in). MUST be declared or Health
-         Connect silently drops the runtime request and live workouts never write back (#412). -->
-    <uses-permission android:name="android.permission.health.WRITE_EXERCISE" />
-    <uses-permission android:name="android.permission.health.WRITE_DISTANCE" />
-    <uses-permission android:name="android.permission.health.READ_VO2_MAX" />
-    <uses-permission android:name="android.permission.health.READ_WEIGHT" />
-    <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
-    <uses-permission android:name="android.permission.health.READ_LEAN_BODY_MASS" />
-    <uses-permission android:name="android.permission.health.READ_EXERCISE" />
-
-    <!-- Resolve the Health Connect provider on Android 14+ (platform) and earlier (app). -->
     <queries>
-        <package android:name="com.google.android.apps.healthdata" />
         <!-- So the connection helper can detect the official WHOOP app and deep-link to its
              info screen (a strap only pairs with one app at a time). Android 11+ visibility. -->
         <package android:name="com.whoop.android" />
@@ -174,11 +142,10 @@
         </activity>
 
         <!--
-          Launcher icon aliases. Exactly one is ever enabled (see SettingsScreen "App Icon"):
-            .IconDefault — machined-titanium icon (@mipmap/ic_launcher), enabled by default.
-            .IconNavy    — blued/dark-blue titanium icon (@mipmap/ic_launcher_navy), disabled.
-          Both target MainActivity and carry the MAIN/LAUNCHER filter, so whichever is enabled is the
-          one home-screen entry point. Toggling them is what re-paints the launcher icon at runtime.
+          The single launcher entry. This was a PAIR of aliases (.IconDefault / .IconNavy) toggled at
+          runtime by a Settings "App icon" picker; that picker is gone, so the second alias could never
+          be enabled again and went with it. Kept as an alias rather than folding back onto MainActivity
+          so an install that had .IconNavy enabled still resolves a launcher entry after updating.
         -->
         <activity-alias
             android:name="com.noop.IconDefault"
@@ -187,20 +154,6 @@
             android:enabled="true"
             android:icon="@mipmap/ic_launcher"
             android:roundIcon="@mipmap/ic_launcher"
-            android:label="@string/app_name">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-
-        <activity-alias
-            android:name="com.noop.IconNavy"
-            android:targetActivity="com.noop.ui.MainActivity"
-            android:exported="true"
-            android:enabled="false"
-            android:icon="@mipmap/ic_launcher_navy"
-            android:roundIcon="@mipmap/ic_launcher_navy"
             android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -305,6 +258,13 @@
              raises a low-key notification. Not exported. -->
         <receiver
             android:name="com.noop.alarm.WindDownReceiver"
+            android:exported="false" />
+
+        <!-- Lucid-dream daytime reality check: fires the triple micro-pulse on the strap at random
+             times inside the user's chosen window. Inexact, non-wakeup alarms; no notification.
+             Not exported. -->
+        <receiver
+            android:name="com.noop.alarm.LucidRealityCheckReceiver"
             android:exported="false" />
 
         <!-- Shares the strap log (a cache file) for bug reports. Not exported; read access is granted

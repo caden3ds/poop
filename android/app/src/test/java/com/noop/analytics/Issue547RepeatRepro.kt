@@ -35,7 +35,7 @@ import org.junit.Test
  * What it demonstrates (see the asserts):
  *  (A) DISPROVES the off-wrist-repeat theory: a 12h motionless "strap on a desk" block (still + flat low
  *      HR, even with realistic sub-threshold sensor jitter) is NOT scored as sleep at all — analyzeDay
- *      returns totalSleepMin=null on EVERY day. NOOP does NOT hallucinate a 12h "721" from a motionless
+ *      returns totalSleepMin=null on EVERY day. POOP does NOT hallucinate a 12h "721" from a motionless
  *      strap, so pikapik's 721 is NOT produced by this mechanism. (Permanent guard against that regression.)
  *  (B) The source token is a pure LABEL from the imported day-key sets — INDEPENDENT of `matched`. A day
  *      with an Apple daily row reads "imported:apple" whether or not a block matched. So the log's
@@ -174,7 +174,7 @@ class Issue547RepeatRepro {
         // (A) THE FINDING (disproves the off-wrist-repeat theory): an off-wrist "strap on a desk" block —
         //     12h still (sub-threshold jitter) with flat low HR — is NOT scored as sleep AT ALL. Our real
         //     detector (motion-architecture + off-wrist guards) returns totalSleepMin=null on EVERY day.
-        //     So NOOP does NOT hallucinate a 12h "721" sleep from a motionless strap; pikapik's 721 is
+        //     So POOP does NOT hallucinate a 12h "721" sleep from a motionless strap; pikapik's 721 is
         //     therefore NOT produced by this mechanism. This test is a permanent guard for that.
         assertTrue(
             "a 12h motionless off-wrist block must NOT be scored as sleep on any day (got: " +

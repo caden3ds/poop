@@ -18,6 +18,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -592,7 +594,12 @@ fun BarChart(
                     val topPad = 4f
                     val usableH = (h - topPad).coerceAtLeast(1f)
                     val slot = w / clean.size
-                    val barWidth = (slot * 0.64f).coerceAtLeast(1f)
+                    // Capped: with only a night or two of data, 64% of a full-width slot is a bar wider
+                    // than it is tall, which reads as a blob rather than a chart.
+                    val maxBarPx = 28.dp.toPx()
+                    val barWidth = (slot * 0.64f).coerceIn(1f, maxBarPx)
+                    // Top-corner rounding. Kept BELOW half the bar width so it can never exceed the bar's
+                    // own height and bloat the shape.
                     val capRadius = (barWidth / 2f)
                     // Precompute each bar's x centre + top y once.
                     data class BarSeg(val cx: Float, val top: Float)
@@ -607,12 +614,18 @@ fun BarChart(
                     }
                     onDrawBehind {
                         bars.forEachIndexed { i, seg ->
-                            drawLine(
+                            // Bars are ROUNDED RECTS, not round-capped lines. As lines, the bottom cap
+                            // bulged barWidth/2 BELOW the axis, and any bar shorter than that cap radius
+                            // collapsed to a zero-length round-capped line — which renders as a filled
+                            // CIRCLE. On a series with one tall outlier (sleep debt: most nights small,
+                            // one big) that turned the whole chart into blobs spilling out of the frame.
+                            val barHeight = (h - seg.top).coerceAtLeast(1f)
+                            val radius = minOf(capRadius, barHeight / 2f)
+                            drawRoundRect(
                                 color = if (selectionEnabled && i == selectedIndex) color else unselectedColor,
-                                start = Offset(seg.cx, h),
-                                end = Offset(seg.cx, (seg.top + capRadius).coerceAtMost(h)),
-                                strokeWidth = barWidth,
-                                cap = StrokeCap.Round,
+                                topLeft = Offset(seg.cx - barWidth / 2f, seg.top),
+                                size = Size(barWidth, barHeight),
+                                cornerRadius = CornerRadius(radius, radius),
                             )
                         }
                         if (selectionEnabled && selectedIndex in clean.indices) {

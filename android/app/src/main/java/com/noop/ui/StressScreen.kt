@@ -94,8 +94,6 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     // #698: the liquid day-of-sky backdrop is gated on the same "Day-cycle background" setting as Today,
     // so turning it off falls back to the flat theme canvas on every liquid screen alike.
     val context = LocalContext.current
-    val showDayCycleBackground = remember { NoopPrefs.showDayCycleBackground(context) }
-    val skyBehindCards = remember { NoopPrefs.skyBehindCards(context) }
 
     // Stored daily "stress" values (0–3), keyed by day. Loaded once per device; the
     // metricSeries store is the Android analogue of the macOS `repo.series(key:source:)`.
@@ -135,15 +133,6 @@ fun StressScreen(vm: AppViewModel, onBreathe: () -> Unit = {}) {
     LazyScreenScaffold(
         title = uiString(R.string.l10n_stress_screen_stress_bad33342),
         subtitle = "Autonomic load from HRV and resting heart rate",
-        // LIQUID SKY BACKDROP (the pilot pattern — LiquidScreenSky.kt): the time-of-day liquid sky settles
-        // into the theme canvas behind the header + hero vessel, full-bleed (full-width, up behind the
-        // status bar via the scaffold's topBackground plumbing), and the cards float OVER it on the flat
-        // surface below. The Android equivalent of the iOS `ScreenScaffold(topBackground: liquidScaffoldSky())`.
-        // Gated on the "Day-cycle background" setting like Today; off passes null (the flat-canvas path).
-        topBackground = if (showDayCycleBackground) { { LiquidScreenSky(fillHeight = skyBehindCards) } } else null,
-        // Sky-behind-cards fills the viewport so the transparent cards reveal the sky the whole way
-        // down (Today / Trends / Sleep / metric-detail parity - same two prefs, same two behaviours).
-        fullBleedBackground = showDayCycleBackground && skyBehindCards,
     ) {
         when {
             model != null -> StressContent(model, daytime, stressIndex, freqHrv, onBreathe)
@@ -241,18 +230,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.StressContent(
     item { StressMethodologyCard(model, modifier = Modifier.staggeredAppear(4)) }
 }
 
-// MARK: - Liquid hero tokens (the liquid restyle)
-//
-// The hero card the stress vessel floats on, ported from the iOS liquid heroCard. `LIQUID_HERO_FILL` is a
-// translucent near-black (mock rgba(13,14,20,.80)) so it floats over the day-of-sky; the vessel + white
-// count-up number read crisp on it. Radius 26 + a white@0.11 hairline give the frosted-glass edge. Same
-// numbers as the Today pilot's hero card.
-private val LIQUID_HERO_FILL: Color = Color(red = 13f / 255f, green = 14f / 255f, blue = 20f / 255f, alpha = 0.80f)
-private val LIQUID_HERO_RADIUS = 26.dp
 
 // MARK: - 1 · Hero — the liquid stress VESSEL (the flat PipBar is gone)
 //
-// The liquid restyle: the headline 0–3 read is now a band-tinted [LiquidVessel] filling to score/3, with
+// The liquid restyle: the headline 0–3 read is now a band-tinted [ScoreRing] filling to score/3, with
 // the count-up value rolled up over it in white (the same HeroScoreVessel idiom as the liquid Today). The
 // band word + StatePill + the one plain-English line ride beside / under it. The score, band, tints
 // (StressRamp: calm blue → steady green → tense amber) and the explanation are UNCHANGED — only the
@@ -267,9 +248,8 @@ private fun StressHeroCard(model: StressModel, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(LIQUID_HERO_RADIUS))
-            .background(LIQUID_HERO_FILL.copy(alpha = LIQUID_HERO_FILL.alpha * CardAppearance.opacity))
-            .border(1.dp, Color.White.copy(alpha = 0.11f * CardAppearance.opacity), RoundedCornerShape(LIQUID_HERO_RADIUS))
+            .clip(RoundedCornerShape(Metrics.cardRadius))
+                .frostedCardSurface()
             .padding(Metrics.cardPadding),
     ) {
         Column(
@@ -304,7 +284,7 @@ private fun StressHeroCard(model: StressModel, modifier: Modifier = Modifier) {
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    LiquidVessel(
+                    ScoreRing(
                         value = fraction,
                         tint = bandColor,
                         animated = true,
@@ -741,7 +721,7 @@ private fun daytimeLineDescription(hours: List<DaytimeStress.HourPoint>): String
 // MARK: - Time-in-band — Calm / Moderate / High split of the scored waking hours (liquid tubes)
 //
 // The liquid restyle of the README screen-9 totals split: instead of one stacked proportional bar, each
-// band gets its OWN [LiquidTube] row filled to that band's SHARE of the day's scored hours (a genuine
+// band gets its OWN [MetricBar] row filled to that band's SHARE of the day's scored hours (a genuine
 // single-value 0..1 fraction per row — Calm hours / total, Moderate / total, High / total), tinted by the
 // SAME StressRamp band colour (blue → green → amber). `animated = false` so the three tubes pose once and
 // cost nothing per frame. The swatch + label sit on the left, the hour count on the right; the shares still
@@ -775,7 +755,7 @@ private enum class StressTotalsBand(val title: String, val color: Color) {
 }
 
 /** One band's share of the scored waking hours as a liquid tube row: a swatch + label on the left, the
- *  band-tinted [LiquidTube] filled to hours/total, and the hour count on the right. Posed (animated=false). */
+ *  band-tinted [MetricBar] filled to hours/total, and the hour count on the right. Posed (animated=false). */
 @Composable
 private fun TimeInBandRow(band: StressTotalsBand, hours: Int, total: Double) {
     val frac = if (total > 0) hours / total else 0.0
@@ -798,7 +778,7 @@ private fun TimeInBandRow(band: StressTotalsBand, hours: Int, total: Double) {
             color = if (hours > 0) band.color else Palette.textTertiary,
             modifier = Modifier.width(72.dp),
         )
-        LiquidTube(
+        MetricBar(
             frac = frac,
             tint = band.color,
             height = Metrics.progressHeight,
@@ -1124,7 +1104,7 @@ private fun StressLoading() {
 private fun StressEmpty() {
     DataPendingNote(
         title = uiString(R.string.l10n_stress_screen_no_stress_history_yet_ec962e3c),
-        body = "No stress history yet. Import your WHOOP export in Data Sources to see it.",
+        body = "No stress history yet. Wear the strap and this fills in over the next few days.",
     )
 }
 

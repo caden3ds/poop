@@ -114,10 +114,14 @@ fun StepsCalibrationScreen(
         // Phone step counts come from apple-health AND, for HC-only users, Health Connect (#37). Both are
         // stored in appleDaily under their own source; union them with apple-health winning per day.
         val stepsByDay = LinkedHashMap<String, Int>()
-        for (row in vm.repo.appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, "0000-01-01", "9999-12-31")) {
+        // Gated on one cheap COUNT — nothing can write these rows since the importers were removed.
+        val hasImported = vm.repo.hasImportedDailySources()
+        for (row in if (!hasImported) emptyList()
+        else vm.repo.appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, "0000-01-01", "9999-12-31")) {
             row.steps?.takeIf { it > 0 }?.let { stepsByDay[row.day] = it }
         }
-        for (row in vm.repo.appleDaily(WhoopRepository.HEALTH_CONNECT_SOURCE, "0000-01-01", "9999-12-31")) {
+        for (row in if (!hasImported) emptyList()
+        else vm.repo.appleDaily(WhoopRepository.HEALTH_CONNECT_SOURCE, "0000-01-01", "9999-12-31")) {
             row.steps?.takeIf { it > 0 }?.let { stepsByDay.putIfAbsent(row.day, it) }
         }
         val phoneDays = stepsByDay.entries
@@ -263,7 +267,7 @@ private fun NoMotionNote() {
             }
             Text(
                 uiString(R.string.l10n_steps_calibration_screen_we_re_not_seeing_any_motion_6ac8e092) +
-                    "banked motion history, so your strap needs to sync that history before NOOP has " +
+                    "banked motion history, so your strap needs to sync that history before POOP has " +
                     "anything to count.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,

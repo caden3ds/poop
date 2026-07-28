@@ -46,13 +46,10 @@ object Palette {
     // The active scheme's tokens — snapshot state, so a flip re-resolves every read below (in
     // composables AND Canvas DrawScopes) with no call-site changes. Set by NoopTheme.
     internal var active by mutableStateOf(DarkTokens)
-    /** True when the light scheme is active (surface code uses this for the per-scheme idiom). */
-    val isLight: Boolean get() = active === LightTokens
 
-    // Chart style — when CLASSIC, the DATA accessors below return the throwback red→green ramps
-    // (light/dark tuned). Reads ChartStylePrefs.style (snapshot state) so a flip re-colours live.
-    val isClassic: Boolean get() = ChartStylePrefs.style == ChartStyle.CLASSIC
-    private val classic: ClassicRamp get() = if (isLight) ClassicLight else ClassicDark
+    // The "Classic" throwback chart ramp went with the Appearance section that was its only control:
+    // with no picker there is one ramp, so the accessors below read the active tokens directly instead
+    // of branching on a value that could never change.
 
     // Surfaces.
     val surfaceBase get() = active.surfaceBase
@@ -88,10 +85,9 @@ object Palette {
     val recovery078 get() = active.recovery078
     val recovery100 get() = active.recovery100
 
-    /** Ordered gradient stops for the recovery scale (Titanium gold, or Classic red→green). */
+    /** Ordered gradient stops for the recovery scale. */
     val recoveryStops: List<Pair<Float, Color>>
-        get() = if (isClassic) classic.recovery
-                else listOf(0.00f to recovery000, 0.30f to recovery030, 0.55f to recovery055, 0.78f to recovery078, 1.00f to recovery100)
+        get() = listOf(0.00f to recovery000, 0.30f to recovery030, 0.55f to recovery055, 0.78f to recovery078, 1.00f to recovery100)
 
     // Strain / Effort ramp.
     val strain000 get() = active.strain000
@@ -100,56 +96,55 @@ object Palette {
     val strain100 get() = active.strain100
 
     val strainStops: List<Pair<Float, Color>>
-        get() = if (isClassic) classic.strain
-                else listOf(0.00f to strain000, 0.33f to strain033, 0.66f to strain066, 1.00f to strain100)
+        get() = listOf(0.00f to strain000, 0.33f to strain033, 0.66f to strain066, 1.00f to strain100)
 
-    // Sleep stages (Classic adds a purple REM).
-    val sleepAwake get() = if (isClassic) classic.sleepAwake else active.sleepAwake
-    val sleepLight get() = if (isClassic) classic.sleepLight else active.sleepLight
-    val sleepDeep get() = if (isClassic) classic.sleepDeep else active.sleepDeep
-    val sleepREM get() = if (isClassic) classic.sleepREM else active.sleepREM
+    // Sleep stages.
+    val sleepAwake get() = active.sleepAwake
+    val sleepLight get() = active.sleepLight
+    val sleepDeep get() = active.sleepDeep
+    val sleepREM get() = active.sleepREM
 
-    // HR zones (Classic = grey→green→yellow→orange→red).
-    val zone1 get() = if (isClassic) classic.zone1 else active.zone1
-    val zone2 get() = if (isClassic) classic.zone2 else active.zone2
-    val zone3 get() = if (isClassic) classic.zone3 else active.zone3
-    val zone4 get() = if (isClassic) classic.zone4 else active.zone4
-    val zone5 get() = if (isClassic) classic.zone5 else active.zone5
+    // HR zones.
+    val zone1 get() = active.zone1
+    val zone2 get() = active.zone2
+    val zone3 get() = active.zone3
+    val zone4 get() = active.zone4
+    val zone5 get() = active.zone5
 
     /** HR zones indexed 1..5; index 0 mirrors zone1 for convenience. */
     val hrZones: List<Color> get() = listOf(zone1, zone1, zone2, zone3, zone4, zone5)
 
-    // Status (Classic = green/amber/red).
-    val statusPositive get() = if (isClassic) classic.statusPositive else active.statusPositive
-    val statusWarning get() = if (isClassic) classic.statusWarning else active.statusWarning
-    val statusCritical get() = if (isClassic) classic.statusCritical else active.statusCritical
+    // Status.
+    val statusPositive get() = active.statusPositive
+    val statusWarning get() = active.statusWarning
+    val statusCritical get() = active.statusCritical
 
-    // Per-metric accents (Classic = purple HRV, red risk).
-    val metricCyan get() = if (isClassic) classic.metricCyan else active.metricCyan
-    val metricPurple get() = if (isClassic) classic.metricPurple else active.metricPurple
-    val metricAmber get() = if (isClassic) classic.metricAmber else active.metricAmber
-    val metricRose get() = if (isClassic) classic.metricRose else active.metricRose
+    // Per-metric accents.
+    val metricCyan get() = active.metricCyan
+    val metricPurple get() = active.metricPurple
+    val metricAmber get() = active.metricAmber
+    val metricRose get() = active.metricRose
 
     // Domain "colour worlds" (Classic: Charge green, Effort blue, Rest indigo, Stress amber).
-    val chargeColor get() = if (isClassic) classic.chargeColor else active.chargeColor
-    val chargeDeep get() = if (isClassic) classic.chargeDeep else active.chargeDeep
-    val chargeBright get() = if (isClassic) classic.chargeBright else active.chargeBright
-    val chargeGlow get() = if (isClassic) classic.chargeColor else active.chargeGlow
+    val chargeColor get() = active.chargeColor
+    val chargeDeep get() = active.chargeDeep
+    val chargeBright get() = active.chargeBright
+    val chargeGlow get() = active.chargeGlow
 
-    val effortColor get() = if (isClassic) classic.effortColor else active.effortColor
-    val effortDeep get() = if (isClassic) classic.effortDeep else active.effortDeep
-    val effortBright get() = if (isClassic) classic.effortBright else active.effortBright
-    val effortGlow get() = if (isClassic) classic.effortColor else active.effortGlow
+    val effortColor get() = active.effortColor
+    val effortDeep get() = active.effortDeep
+    val effortBright get() = active.effortBright
+    val effortGlow get() = active.effortGlow
 
-    val restColor get() = if (isClassic) classic.restColor else active.restColor
-    val restDeep get() = if (isClassic) classic.restDeep else active.restDeep
-    val restBright get() = if (isClassic) classic.restBright else active.restBright
-    val restGlow get() = if (isClassic) classic.restColor else active.restGlow
+    val restColor get() = active.restColor
+    val restDeep get() = active.restDeep
+    val restBright get() = active.restBright
+    val restGlow get() = active.restGlow
 
-    val stressColor get() = if (isClassic) classic.stressColor else active.stressColor
-    val stressDeep get() = if (isClassic) classic.stressDeep else active.stressDeep
-    val stressBright get() = if (isClassic) classic.stressBright else active.stressBright
-    val stressGlow get() = if (isClassic) classic.stressColor else active.stressGlow
+    val stressColor get() = active.stressColor
+    val stressDeep get() = active.stressDeep
+    val stressBright get() = active.stressBright
+    val stressGlow get() = active.stressGlow
 
     /** Deep → bright accent pairs (gauge stroke + diagonal card wash) per domain. */
     val chargeGradientStops: List<Pair<Float, Color>> get() = listOf(0.0f to chargeDeep, 1.0f to chargeBright)
@@ -157,7 +152,7 @@ object Palette {
     val restGradientStops: List<Pair<Float, Color>> get() = listOf(0.0f to restDeep, 1.0f to restBright)
     // Stress ramp: Titanium calm-blue→gold→orange, or Classic green→amber→red.
     val stressGradientStops: List<Pair<Float, Color>>
-        get() = if (isClassic) classic.stress else listOf(0.0f to stressDeep, 0.5f to stressColor, 1.0f to stressBright)
+        get() = listOf(0.0f to stressDeep, 0.5f to stressColor, 1.0f to stressBright)
 
     // Scenic background.
     val scenicCenter get() = active.scenicCenter
@@ -375,10 +370,12 @@ object Metrics {
     val space18 = 18.dp
     val space24 = 24.dp
     val sourceBadgeHeight = 18.dp
-    val cardRadius = 18.dp   // Bevel continuous radius (18–22dp)
-    val cornerXs = 2.dp
-    val cornerSm = 12.dp
-    val cornerBadge = 6.dp
+    // One UI leans on generous, soft corners — cards are noticeably rounder than Material's default,
+    // and small controls are fully-rounded pills. Bumped from the old 18/12/6 set.
+    val cardRadius = 26.dp
+    val cornerXs = 4.dp
+    val cornerSm = 16.dp
+    val cornerBadge = 10.dp
     val cornerPill = 50.dp
     val cardPadding = 16.dp
     val gap = 12.dp           // gap between cards
@@ -534,19 +531,17 @@ private val NoopShapes = Shapes(
 )
 
 /**
- * NoopTheme — instrument-grade, now System / Light / Dark. The chosen mode (default System) drives
- * both `Palette.active` (so every `Palette.*` read re-resolves) and the Material scheme. The write to
- * `Palette.active` is guarded + idempotent, and happens before children compose, so there's no flash
- * and no recomposition loop (NoopTheme itself never reads `active`).
+ * NoopTheme — ONE fixed scheme, no light/dark choice.
+ *
+ * The app is designed against a single One UI-style dark canvas, so a light variant is not offered:
+ * two schemes meant every surface decision had to work twice, and the light one was never the design
+ * this fork is aiming at. `Palette.active` is still assigned here (guarded + idempotent, before
+ * children compose) so every `Palette.*` read resolves through the same path as before.
  */
 @Composable
 fun NoopTheme(content: @Composable () -> Unit) {
-    val dark = when (AppearancePrefs.mode) {
-        AppearanceMode.LIGHT -> false
-        AppearanceMode.DARK -> true
-        AppearanceMode.SYSTEM -> isSystemInDarkTheme()
-    }
-    val tokens = if (dark) DarkTokens else LightTokens
+    val dark = true
+    val tokens = DarkTokens
     if (Palette.active !== tokens) Palette.active = tokens
 
     // Status-/nav-bar icon appearance: light icons on the dark theme, dark icons on the warm-paper

@@ -7,8 +7,6 @@ import com.noop.data.PairedDeviceRow
 import com.noop.data.SourceKind
 import com.noop.data.StreamBatch
 import com.noop.data.WhoopRepository
-import com.noop.oura.OuraRingGen
-import com.noop.oura.OuraWearState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -111,33 +109,11 @@ class SourceCoordinator(
     private val _sensorMetrics = MutableStateFlow(StandardHrSource.SensorMetrics())
     val sensorMetrics: StateFlow<StandardHrSource.SensorMetrics> = _sensorMetrics.asStateFlow()
 
-    /** The active Oura source's live adopt outcome, mirrored so the Add-Oura wizard can leave its Adopting
-     *  step (success -> close, failed -> the honest Failed step). [AdoptPhase.Idle] whenever no Oura source
-     *  is live, so a stale outcome never drives a wizard transition. Mirrors Swift `AppModel.ouraAdoptPhase`. */
-    private val _ouraAdoptPhase = MutableStateFlow(OuraLiveSource.AdoptPhase.Idle)
-    val ouraAdoptPhase: StateFlow<OuraLiveSource.AdoptPhase> = _ouraAdoptPhase.asStateFlow()
-
-    /** The active Oura source's honest needs-pairing message (null when none). The wizard treats a non-null
-     *  value during Adopting as an honest failure too (covers no-ack / ack!=OK paths). null whenever no Oura
-     *  source is live. Mirrors Swift `AppModel.ouraNeedsPairing`. */
-    private val _ouraNeedsPairing = MutableStateFlow<String?>(null)
-    val ouraNeedsPairing: StateFlow<String?> = _ouraNeedsPairing.asStateFlow()
-
-    /** The active Oura source's live wear/charge state (worn / charging / off), or null when no Oura source
-     *  is live. Drives the Live screen's On-wrist / Off-wrist read (#628). Mirrors iOS `LiveState.ouraWearState`. */
-    private val _ouraWearState = MutableStateFlow<OuraWearState?>(null)
-    val ouraWearState: StateFlow<OuraWearState?> = _ouraWearState.asStateFlow()
-
-    /** Collects the active Oura source's adoptPhase / needsPairing into the mirrors above; cancelled and
-     *  nulled on teardown so a forgotten ring never leaks a stale outcome. */
-    private var ouraStateJob: kotlinx.coroutines.Job? = null
-
-    /** The single non-WHOOP source currently live — a generic HR strap, FTMS machine, Huami band, or Oura
-     *  ring — held behind the [LiveHrSource] interface. null while WHOOP is active or nothing else is
-     *  paired. Exactly one non-WHOOP source is ever live at a time, and the coordinator only ever connects /
-     *  scans / stops it. Built by [makeSource]; each source owns its OWN scanner/GATT and never touches the
-     *  WHOOP BLE client, so the WHOOP path cannot regress. (An Oura ring additionally surfaces only its OWN
-     *  raw signals + open event tags — NOOP computes its own Charge/Rest — never Oura's encrypted scores.) */
+    /** The single non-WHOOP source currently live — a generic HR strap or an FTMS machine — held behind the
+     *  [LiveHrSource] interface. null while WHOOP is active or nothing else is paired. Exactly one non-WHOOP
+     *  source is ever live at a time, and the coordinator only ever connects / scans / stops it. Built by
+     *  [makeSource]; each source owns its OWN scanner/GATT and never touches the WHOOP BLE client, so the
+     *  WHOOP path cannot regress. */
     private var activeSource: LiveHrSource? = null
     /** The deviceId the active non-WHOOP source ([activeSource]) runs for. */
     private var activeStrapId: String? = null
@@ -338,12 +314,9 @@ class SourceCoordinator(
 
     /**
      * Build the isolated [LiveHrSource] for a device from its registered `sourceKind` — the ONE place that
-     * maps a kind to a concrete driver. An FTMS gym machine runs the FtmsSource; an EXPERIMENTAL Huami
-     * device (Amazfit / Zepp / Mi Band) runs the HuamiHrSource; an EXPERIMENTAL Oura ring runs the
-     * OuraLiveSource; everything else is a generic HR strap on StandardHrSource. Adding a brand adds ONE arm
-     * here (plus a conforming source); nothing else in the coordinator changes. Returns the source WITHOUT
-     * connecting — the caller ([switchToStrap]) does the connect-by-address-else-scan bring-up. Mirrors
-     * macOS `SourceCoordinator.makeSource(for:)`.
+     * maps a kind to a concrete driver. An FTMS gym machine runs the FtmsSource; everything else is a generic
+     * HR strap on StandardHrSource. Returns the source WITHOUT connecting — the caller ([switchToStrap]) does
+     * the connect-by-address-else-scan bring-up.
      */
     private fun makeSource(id: String, row: PairedDeviceRow?): LiveHrSource {
         // Non-null in production (set at the composition root); only the JVM-test paths that never reach a
@@ -356,20 +329,6 @@ class SourceCoordinator(
                 onBattery = batterySink,                          // machine battery → the same live state
                 log = straplog,
             )
-            SourceKind.huami.name -> {
-                val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist Huami samples" }
-                HuamiHrSource(
-                    context = ctx,
-                    deviceId = id,
-                    liveSink = { hr -> liveSink(hr, emptyList()) },   // Huami HR → the existing live recorder
-                    persist = { batch: StreamBatch, deviceId: String ->
-                        scope.launch { runCatching { repo.insert(batch, deviceId) } }
-                    },
-                    log = straplog,
-                    onBattery = batterySink,
-                )
-            }
-            SourceKind.oura.name -> makeOuraSource(id, ctx, row)
             else -> {
                 val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist strap samples" }
                 StandardHrSource(
@@ -392,110 +351,14 @@ class SourceCoordinator(
         }
     }
 
-    /**
-     * Build the EXPERIMENTAL Oura ring source (gen3 / gen4 / gen5) for [id]. Also wires the adopt-outcome
-     * mirror ([ouraStateJob]) and consumes the one-shot adopt consent — side effects the coordinator owns,
-     * so they live here rather than in the plain FTMS / Huami / Standard arms of [makeSource]. Mirrors the
-     * Oura branch of macOS `makeOuraSource`.
-     */
-    private fun makeOuraSource(id: String, ctx: Context, row: PairedDeviceRow?): OuraLiveSource {
-        val repo = requireNotNull(repository) { "SourceCoordinator.repository is required to persist Oura samples" }
-        // The ring generation is carried on the row's model ("Oura Ring 3/4/5"); recover it so the transport
-        // clamps the MTU + picks the gen-appropriate live-HR enable command set. Defaults to gen3 if the
-        // model is missing/unrecognised (OuraRingGen.from).
-        val ringGen = OuraRingGen.from(row?.model ?: "")
-        val source = OuraLiveSource(
-            context = ctx,
-            deviceId = id,
-            ringGen = ringGen,
-            liveSink = { hr, rr -> liveSink(hr, rr) },   // ring HR + R-R → the existing live recorder
-            // The 16-byte application install key, read from the at-rest-encrypted key store keyed by this
-            // ring's device id. INJECTED, never hardcoded; null drives OuraLiveSource's honest needs-pairing
-            // path (no faked data). Read fresh on each connect so a key provisioned mid-session (the adopt
-            // install) is picked up on the post-install re-auth.
-            authKey = { OuraInstallKeyStore.load(ctx, id) },
-            persist = { batch: StreamBatch, deviceId: String ->
-                scope.launch { runCatching { repo.insert(batch, deviceId) } }
-            },
-            persistSleepSession = { s: com.noop.oura.OuraSleepSession, deviceId: String ->
-                // The ring-PROVIDED hypnogram night, upserted under the ring's OWN id (imported/measured
-                // side, NOT the "-noop" computed sibling) so mergeSleepRichness surfaces Oura's SleepNet
-                // staging over NOOP's sparse-motion computed night (#325).
-                scope.launch {
-                    runCatching {
-                        repo.upsertSleepSessions(listOf(com.noop.data.SleepSession(
-                            deviceId = deviceId, startTs = s.startTs, endTs = s.endTs,
-                            efficiency = s.efficiency, stagesJSON = s.stagesJson)))
-                    }
-                }
-            },
-            log = straplog,           // Oura connect/auth/stream lifecycle → the SAME exported strap log (#421)
-            onBattery = batterySink,  // ring battery → the same live state the WHOOP strap battery uses
-            onModel = { model -> scope.launch { runCatching { registry.setModel(id, model) } } },  // #772: correct a name-guessed gen
-            onSerial = { serial -> adoptOuraSerial(currentId = id, serial = serial) },  // #771
-        )
-        // CONSUME the one-shot adopt-intent the wizard armed after its irreversible-consent gate AND its
-        // second "Take over" confirm (and ONLY then). True permits the DANGEROUS post-factory-reset key
-        // install for THIS session; the Advanced-key path and every later read-only reconnect read false, so
-        // they NEVER provision a key (OURA_PROTOCOL.md s3.2). One-shot by design: a single consent provisions
-        // ONE install. setAdoptIntent must run BEFORE connect (the driver is built per connect with
-        // allowKeyInstall wired from it) — the caller connects only after this returns, so the order holds.
-        if (OuraInstallKeyStore.consumePendingAdopt(ctx, id)) {
-            source.setAdoptIntent(true)
-            straplog("Oura: adopt consent granted - this session may install NOOP's key")
-        }
-        // Mirror this source's live adopt outcome + honest needs-pairing message so the wizard can leave its
-        // Adopting step on a confirmed streaming (success) or an honest Failed. Reset on teardown.
-        ouraStateJob?.cancel()
-        ouraStateJob = scope.launch {
-            launch { source.adoptPhase.collect { _ouraAdoptPhase.value = it } }
-            launch { source.needsPairing.collect { _ouraNeedsPairing.value = it } }
-            launch { source.ouraWearState.collect { _ouraWearState.value = it } }
-        }
-        return source
-    }
-
-    /**
-     * #771 (twin of Swift's `SourceCoordinator.adoptOuraSerial`): the live Oura source read the ring's stable
-     * SERIAL on connect. Re-point this device from its transient address-based id ([currentId]) onto its
-     * `oura-<serial>` id (prefix from the brand catalog, never a literal), so a re-pair never orphans history.
-     * Folds ONLY the active row (other past `oura-*` rows are left untouched — the store method enforces that),
-     * migrates the install key (else the re-pointed session can't authenticate), then `setActive` +
-     * `onActiveDeviceChanged` re-point the running source onto the serial id. Runs on [scope] so it's already
-     * off the BLE callback thread; re-checks it is still the active device before acting.
-     */
-    private fun adoptOuraSerial(currentId: String, serial: String) {
-        val ctx = context ?: return
-        val serialId = "${ExperimentalBrand.OURA.idPrefix}-$serial"
-        if (currentId == serialId) return
-        scope.launch {
-            if (registry.activeDeviceId() != currentId) return@launch
-            if (registry.adoptSerialIdentity(currentId, serialId)) {
-                OuraInstallKeyStore.load(ctx, currentId)?.let { key ->
-                    OuraInstallKeyStore.save(ctx, serialId, key)
-                    OuraInstallKeyStore.clear(ctx, currentId)
-                }
-                straplog("Oura: adopted stable serial id $serialId (was $currentId) - re-pointing onto the ring's serial (#771)")
-                registry.setActive(serialId)
-                onActiveDeviceChanged(serialId)
-            }
-        }
-    }
-
-    /** Stop the live non-WHOOP source (standard strap, FTMS machine, Huami device, or Oura ring) and drop
-     *  the reference. Idempotent — exactly one source is ever live. */
+    /** Stop the live non-WHOOP source (standard strap or FTMS machine) and drop the reference. Idempotent —
+     *  exactly one source is ever live. */
     private fun tearDownNonWhoopSource() {
         activeSource?.stop()
         activeSource = null
-        // Stop mirroring the (now torn-down) Oura source and clear the mirrors so a stale adopt outcome /
-        // needs-pairing message never outlives the source or drives a later wizard transition.
-        ouraStateJob?.cancel(); ouraStateJob = null
-        _ouraAdoptPhase.value = OuraLiveSource.AdoptPhase.Idle
-        _ouraNeedsPairing.value = null
-        _ouraWearState.value = null   // #628: no live Oura source -> no wear badge
         // A stale speed/cadence/power readout must not outlive the strap session (the source's own stop()
-        // already pushes an empty SensorMetrics, but reset here too so leaving for WHOOP / FTMS / Huami —
-        // none of which feed this flow — is clean and immediate).
+        // already pushes an empty SensorMetrics, but reset here too so leaving for WHOOP / FTMS — neither of
+        // which feeds this flow — is clean and immediate).
         _sensorMetrics.value = StandardHrSource.SensorMetrics()
     }
 

@@ -23,11 +23,17 @@ android {
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.noop.whoop"
+        // Poop's OWN install identity — deliberately unrelated to upstream NOOP's "com.noop.whoop",
+        // so this fork installs as a SEPARATE app with its own data directory and can never share
+        // state with (or upgrade over) a NOOP install. The Kotlin source package stays `com.noop.**`:
+        // it is invisible to users, and renaming 348 files would only churn the manifest, services,
+        // receivers and providers that reference it.
+        applicationId = "com.hardspace.poop"
         minSdk = 26
         targetSdk = 34
-        versionCode = 298
-        versionName = "9.1.0"
+        // Version restarts at 1.0.0 — this fork's history is its own, not a continuation of NOOP's.
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -190,12 +196,9 @@ dependencies {
     ksp("androidx.room:room-compiler:$roomVersion")
 
     // --- AI Coach (opt-in, bring-your-own-key). HTTP client + Keystore-backed key storage. ---
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
     // --- Health Connect (optional native Android import of steps/HR/HRV/sleep/etc.) ---
     // Pinned to alpha07: alpha11+ require compileSdk 35; this module is compileSdk 34.
-    implementation("androidx.health.connect:connect-client:1.1.0-alpha07")
 
     // --- Unit / instrumentation tests ---
     testImplementation("junit:junit:4.13.2")

@@ -412,7 +412,7 @@ object Baselines {
         sourceId.startsWith("oura") -> "oura"
         sourceId.startsWith("fitbit") -> "fitbit"
         sourceId.startsWith("garmin") -> "garmin"
-        // "apple-health" / "health-connect" fall through to "whoop" ON PURPOSE: NOOP's Apple/HC daily
+        // "apple-health" / "health-connect" fall through to "whoop" ON PURPOSE: POOP's Apple/HC daily
         // rows ride the strap source's scale, and HC is a pass-through whose true origin is unknowable,
         // so they must NOT open a false era boundary against WHOOP nights.
         else -> "whoop"

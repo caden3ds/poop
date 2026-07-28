@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -175,6 +176,11 @@ fun SmartAlarmScreen(vm: AppViewModel) {
         // at the PHONE alarm's time; this card is the strap's standalone schedule.
         item { StrapAlarmCard(vm) }
 
+        // Fall-back-asleep re-buzz — its OWN card, deliberately AFTER both alarm cards because it
+        // applies to whichever of the two woke you (both wake paths stamp the same fire signal, and
+        // the HR floor is measured from the whole overnight stream, not the phone alarm's window).
+        item { RebuzzCard(vm) }
+
         // The cross-platform wind-down nudge lives here too.
         item { WindDownCard(vm) }
 
@@ -218,7 +224,7 @@ private fun StrapAlarmCard(vm: AppViewModel) {
             // 4.0 path experimental. The 5/MG Experimental-gate branch below is deliberately untouched.
             ToggleRowLocal(
                 label = uiString(R.string.l10n_smart_alarm_screen_wake_me_with_a_strap_buzz_1681ba1d),
-                help = "Arms the strap to buzz at your wake time, even if NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss.",
+                help = "Arms the strap to buzz at your wake time, even if POOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss.",
                 checked = smartAlarm,
                 onChange = { vm.setSmartAlarmEnabled(it) },
             )
@@ -269,7 +275,7 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                         if (live.bonded)
                             // Truth-sync (#535): confirmed buzzing on a real WHOOP 4.0; byte-identical
                             // wording to the Swift SmartAlarmView.
-                            "Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or NOOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss."
+                            "Armed on the strap itself, so it can buzz at your wake time even if your phone is asleep or POOP is closed. Sends the exact alarm command the official app sends, confirmed buzzing on a real WHOOP 4.0 (community wire capture + on-device test, #535). Keep a backup alarm for anything you truly can't miss."
                         else
                             "Connect your strap to arm this; it's set on the strap's own firmware alarm. Confirmed working on WHOOP 4.0; still experimental on 5.0 and MG. Keep a backup alarm for anything you truly can't miss.",
                         style = NoopType.footnote, color = Palette.textTertiary,
@@ -337,6 +343,43 @@ private fun AlarmSettingsCard(content: @Composable () -> Unit) {
     }
 }
 
+/**
+ * The fall-back-asleep re-buzz — works with BOTH alarms on this screen. Either wake path (the phone
+ * wake-window alarm or the strap's scheduled firmware alarm) stamps the same fire signal; the BLE
+ * service then watches the live HR — if it settles back to tonight's measured sleeping level for a
+ * few minutes, NOOP arms the strap's own wake alarm a minute out (it buzzes insistently until
+ * double-tapped off) and keeps doing so while the user stays asleep. Honest dependencies in the
+ * copy: it needs the strap streaming overnight (hours of HR history establish the floor) and the
+ * background connection alive. It can only ever ADD a nudge — the wake alarm itself already fired.
+ */
+@Composable
+private fun RebuzzCard(vm: AppViewModel) {
+    val enabled by vm.phoneAlarmRebuzzEnabled.collectAsStateWithLifecycle()
+    NoopCard(padding = 20.dp, tint = if (enabled) Palette.accent else null) {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Overline("After the alarm")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Snooze, contentDescription = null, tint = Palette.accent)
+                    Spacer(Modifier.width(10.dp))
+                    Text("Fall-back-asleep re-buzz", style = NoopType.title2, color = Palette.textPrimary)
+                }
+            }
+            ToggleRowLocal(
+                label = "Buzz again if I fall back asleep",
+                help = "Works with both alarms above. After either fires, POOP keeps watching your heart " +
+                    "rate — if it settles back to tonight's sleeping level for a few minutes, POOP arms " +
+                    "the strap's own wake alarm a minute out, which buzzes insistently until you " +
+                    "double-tap it off, and keeps doing that for as long as you stay asleep. Your normal " +
+                    "alarm schedule is restored automatically. Needs the strap worn and streaming " +
+                    "overnight, with the background connection on.",
+                checked = enabled,
+                onChange = { vm.setPhoneAlarmRebuzzEnabled(it) },
+            )
+        }
+    }
+}
+
 /** The cross-platform evening wind-down nudge — a gentle reminder, not an alarm. Rest-tinted when on. */
 @Composable
 private fun WindDownCard(vm: AppViewModel) {
@@ -373,7 +416,7 @@ private fun ExplanationCard() {
             Text(
                 uiString(R.string.l10n_smart_alarm_screen_while_you_re_inside_the_window_8700ca3b) +
                     "sleep sits near your nightly low and stays steady; when your heart rate lifts above " +
-                    "that (a sign you're sleeping more lightly or starting to stir), NOOP wakes you a " +
+                    "that (a sign you're sleeping more lightly or starting to stir), POOP wakes you a " +
                     "little early so you come up from a lighter phase.",
                 style = NoopType.footnote, color = Palette.textSecondary,
             )

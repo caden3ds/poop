@@ -114,7 +114,7 @@ enum class DeviceFamily {
  * Only `WHOOP4` and `MAVERICK_GOOSE_FD4B` are connectable in NOOP today. The other services are
  * protocol facts from reverse engineering and are diagnostic-only until their connection framing is
  * mapped and hardware-tested. In particular, [PUFFIN_1150] is intentionally named with its UUID
- * prefix because NOOP already uses "puffin" for the fd4b/Maverick-Goose packet framing.
+ * prefix because POOP already uses "puffin" for the fd4b/Maverick-Goose packet framing.
  */
 private fun unsupportedWhoopCharacteristicUuidStrings(prefix: String, suffix: String): List<String> =
     listOf("0002", "0003", "0004", "0005", "0007").map { "$prefix$it-$suffix" }
@@ -168,7 +168,7 @@ enum class WhoopGattServiceFamily(
     val isConnectable: Boolean get() = connectableDeviceFamily != null
 
     val diagnosticUnsupportedMessage: String
-        get() = "$displayName detected but unsupported; NOOP will not connect or send commands."
+        get() = "$displayName detected but unsupported; POOP will not connect or send commands."
 
     companion object {
         val unsupportedFamilies: List<WhoopGattServiceFamily> =

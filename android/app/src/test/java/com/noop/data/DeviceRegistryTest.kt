@@ -103,6 +103,43 @@ class DeviceRegistryTest {
         override suspend fun deleteLiveSessionsFor(deviceId: String) { deletedTables += "liveSession" to deviceId }
         override suspend fun deleteDismissedWorkoutsFor(deviceId: String) { deletedTables += "dismissedWorkout" to deviceId }
         override suspend fun deleteDismissedSleepsFor(deviceId: String) { deletedTables += "dismissedSleep" to deviceId }
+
+        // #771 adopt-serial surface. This fake models only the registry tables (pairedDevice via
+        // [devices], dayOwnership via [owners]); the 22 sample-table re-keys are validated against real
+        // Room and are no-ops here, mirroring the delete*For stubs above. The registry-modelled pieces
+        // (setModel / pairedDevice / row deletes / dayOwnership re-key) mirror the real table ops.
+        override suspend fun setModel(id: String, model: String) {
+            devices[id]?.let { devices[id] = it.copy(model = model) }
+        }
+        override suspend fun pairedDevice(id: String): PairedDeviceRow? = devices[id]
+        override suspend fun deletePairedDeviceRow(id: String) { devices.remove(id) }
+        override suspend fun deleteDeviceRow(id: String) { /* no device-table model in this fake */ }
+        override suspend fun reKeyHr(from: String, to: String) {}
+        override suspend fun reKeyRr(from: String, to: String) {}
+        override suspend fun reKeySpo2(from: String, to: String) {}
+        override suspend fun reKeySkinTemp(from: String, to: String) {}
+        override suspend fun reKeyResp(from: String, to: String) {}
+        override suspend fun reKeyGravity(from: String, to: String) {}
+        override suspend fun reKeySteps(from: String, to: String) {}
+        override suspend fun reKeyPpgHr(from: String, to: String) {}
+        override suspend fun reKeyPpgWaveform(from: String, to: String) {}
+        override suspend fun reKeyRawImu(from: String, to: String) {}
+        override suspend fun reKeyEvents(from: String, to: String) {}
+        override suspend fun reKeyBattery(from: String, to: String) {}
+        override suspend fun reKeyDailyMetrics(from: String, to: String) {}
+        override suspend fun reKeySleepSessions(from: String, to: String) {}
+        override suspend fun reKeyJournal(from: String, to: String) {}
+        override suspend fun reKeyWorkouts(from: String, to: String) {}
+        override suspend fun reKeyAppleDaily(from: String, to: String) {}
+        override suspend fun reKeyMetricSeries(from: String, to: String) {}
+        override suspend fun reKeyDayOwnership(from: String, to: String) {
+            for ((day, row) in owners) if (row.deviceId == from) owners[day] = row.copy(deviceId = to)
+        }
+        override suspend fun reKeySleepStates(from: String, to: String) {}
+        override suspend fun reKeyLabMarkers(from: String, to: String) {}
+        override suspend fun reKeyLiveSessions(from: String, to: String) {}
+        override suspend fun reKeyDismissedWorkouts(from: String, to: String) {}
+        override suspend fun reKeyDismissedSleeps(from: String, to: String) {}
     }
 
     /** Registry over the fake DAO with a pass-through transactor (Room's withTransaction stand-in). */

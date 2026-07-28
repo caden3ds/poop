@@ -1,28 +1,26 @@
 package com.noop.analytics
 
-import com.noop.ingest.ExerciseTypes
 
-/** One selectable activity. [exerciseType] is a Health Connect EXERCISE_TYPE_* constant. */
+/** One selectable activity. [exerciseType] is an internal [SportCatalog] id, not an external code. */
 data class Sport(val exerciseType: Int, val name: String, val isDistanceSport: Boolean)
 
 object WorkoutSport {
-    // Health-Connect-typed sports + the EXTRA sports HC has no type for (e.g. Padel, #77/#152), which
-    // ride a fallback HC type but keep their own NOOP label. The extras are inserted just before
-    // "Other" so the picker still ends on the generic catch-all. Shared by the picker (live + manual)
-    // AND the HC writeback (Sport.exerciseType).
+    // The catalogue sports plus the EXTRA ones that share an id with a broader entry (e.g. Padel) but
+    // keep their own label. The extras are inserted just before "Other" so the picker still ends on the
+    // generic catch-all.
     val all: List<Sport> = buildList {
-        ExerciseTypes.NAMES.forEach { (type, name) ->
+        SportCatalog.NAMES.forEach { (type, name) ->
             if (name == "Other") return@forEach // re-appended last, after the extras
-            add(Sport(type, name, isDistanceSport = type in ExerciseTypes.DISTANCE_TYPES))
+            add(Sport(type, name, isDistanceSport = type in SportCatalog.DISTANCE_TYPES))
         }
-        ExerciseTypes.EXTRA.forEach { (name, fallbackType) ->
+        SportCatalog.EXTRA.forEach { (name, fallbackType) ->
             add(Sport(fallbackType, name, isDistanceSport = false))
         }
-        ExerciseTypes.NAMES.entries.firstOrNull { it.value == "Other" }?.let { (type, name) ->
-            add(Sport(type, name, isDistanceSport = type in ExerciseTypes.DISTANCE_TYPES))
+        SportCatalog.NAMES.entries.firstOrNull { it.value == "Other" }?.let { (type, name) ->
+            add(Sport(type, name, isDistanceSport = type in SportCatalog.DISTANCE_TYPES))
         }
     }
-    fun nameFor(type: Int) = ExerciseTypes.nameFor(type)
+    fun nameFor(type: Int) = SportCatalog.nameFor(type)
 
     /** The default when none is chosen ("Other"). */
     val default: Sport get() = all.first { it.name == "Other" }

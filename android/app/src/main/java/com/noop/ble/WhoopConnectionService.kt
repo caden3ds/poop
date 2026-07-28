@@ -18,9 +18,15 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.noop.NoopApplication
 import com.noop.R
+import com.noop.alarm.LucidNightRunner
+import com.noop.alarm.NightTroughTracker
+import com.noop.alarm.RebuzzWatcher
 import com.noop.alarm.SleepWindowWatcher
 import com.noop.alarm.SmartAlarmScheduler
 import com.noop.alarm.SmartAlarmStore
+import com.noop.analytics.LiveRemEstimator
+import com.noop.analytics.LucidCuePolicy
+import com.noop.ui.LucidPrefs
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.RestScorer
@@ -116,6 +122,43 @@ class WhoopConnectionService : Service() {
      *  The detector is reset each time we (re)enter a window. */
     private val sleepWatcher = SleepWindowWatcher()
     private var inAlarmWindow = false
+
+    /** Fall-back-asleep re-buzz watcher. Armed when a fresh alarm-fired stamp appears in the store
+     *  (either wake path writes one) with the night trough measured by [nightTrough]; fed the same
+     *  live HR; on a sustained sink back to the sleep floor the strap is woken again (one-shot
+     *  firmware alarm + immediate buzz). Bounded and opt-in — see [RebuzzWatcher]. */
+    private val rebuzzWatcher = RebuzzWatcher()
+
+    /** Overnight HR-floor tracker for the re-buzz — fed EVERY live HR tick, independent of any alarm
+     *  state, so the floor exists for the strap's own scheduled firmware alarm too (the light-sleep
+     *  watcher above only ever learns it inside the PHONE alarm's window). Windowed to one night so a
+     *  previous night's floor can never leak into today's re-buzz judgement. */
+    private val nightTrough = NightTroughTracker()
+
+    /** The alarm-fired stamp the re-buzz watcher was last armed off, so one fire arms exactly once
+     *  (the collector sees the same persisted stamp on every HR tick). */
+    private var rebuzzArmedForFireMs = 0L
+
+    /** Lucid-dream REM cue runtime. Fed the SAME live HR tick as the re-buzz + trough tracker; all of
+     *  its restraint lives in the pure [com.noop.analytics.LucidCuePolicy]. Opt-in, default off. */
+    private val lucidRunner = LucidNightRunner()
+
+    /** The learned personal REM template, loaded once per night from scored history. Null means the
+     *  estimator stands down (cold start) — the runner is fed it either way and refuses on its own. */
+    private var lucidTemplate: LiveRemEstimator.RemTemplate? = null
+
+    /** The local date the lucid night counters + template belong to; a new date resets both. */
+    private var lucidNightKey: String? = null
+
+    /** First HR tick of this sleep stretch at or below the sleep ceiling — the approximate sleep onset
+     *  the REM cycle prior is measured from. APPROXIMATE on purpose: it is the same "under the ceiling"
+     *  heuristic [SleepWindowWatcher] already encodes, and the prior only needs a coarse position in
+     *  the night. Cleared whenever HR sits above the ceiling long enough to mean the user is up. */
+    private var lucidAsleepSinceMs: Long? = null
+
+    /** Consecutive above-ceiling ticks, used to clear [lucidAsleepSinceMs] without a single stray
+     *  high reading (a turn-over spike) resetting the whole night's clock. */
+    private var lucidAwakeTicks = 0
 
     /** The smart-alarm HR collector, alive for the life of the service. */
     private var alarmJob: Job? = null
@@ -349,11 +392,57 @@ class WhoopConnectionService : Service() {
                 .map { it.heartRate ?: 0 }
                 .conflate()
                 .collect { hr ->
+                    val now = System.currentTimeMillis()
+                    // Track the overnight HR floor UNCONDITIONALLY (cheap, bounded) so the re-buzz has
+                    // a measured floor no matter which alarm wakes the user — phone wake window OR the
+                    // strap's own scheduled firmware alarm. The tracker self-gates (ceiling, one-night
+                    // window, hours-of-coverage minimum before it answers).
+                    nightTrough.feed(hr, now)
+                    // Lucid-dream REM cue. Rides the SAME tick as the trough tracker so it needs no
+                    // second collector or wake-lock; entirely opt-in and silent by default. Every
+                    // refusal (cold start, no floor, budget, arousal) is decided inside the pure
+                    // policy/estimator — this block only supplies inputs and performs the buzz.
+                    runCatching { tickLucid(hr, now) }
+                    // Fall-back-asleep re-buzz. Runs BEFORE the enabled/deadline short-circuit below:
+                    // by the time the post-fire HR arrives, the receiver has already cleared + re-armed
+                    // the schedule for TOMORROW, so the window logic below is dormant — but the re-buzz
+                    // watch is exactly then. Arm once per fresh fire stamp, seeded with tonight's
+                    // measured HR floor; no measured floor → honest no-op.
+                    if (store.rebuzzEnabled) {
+                        val firedAt = store.lastFiredAtMs
+                        if (firedAt > rebuzzArmedForFireMs && now - firedAt <= REBUZZ_STAMP_FRESH_MS) {
+                            rebuzzArmedForFireMs = firedAt
+                            val trough = nightTrough.troughBpm(now)
+                            if (trough != null) {
+                                rebuzzWatcher.arm(now, trough)
+                                ble.externalLog("Re-buzz: armed (night floor=${trough}bpm) after alarm fire")
+                            } else {
+                                ble.externalLog("Re-buzz: too little overnight HR to know tonight's floor — standing down")
+                            }
+                        }
+                        if (rebuzzWatcher.shouldRebuzz(hr, now)) {
+                            // The persistent wake: arm the strap's OWN firmware alarm a minute out —
+                            // unlike a notification buzz (a few motor loops, sleep-through-able), the
+                            // firmware alarm keeps buzzing until the user double-taps it off. It is
+                            // one-shot, so firing consumes it; the fire event (57) then re-stamps
+                            // lastFiredAtMs, which re-arms THIS watcher for another round while the
+                            // user stays at the sleep floor, and AppViewModel restores the normal
+                            // schedule shortly after each execution. armStrapAlarm self-gates (5/MG
+                            // needs Experimental and logs when not armed), so the immediate soft buzz
+                            // below is both the heads-up and the fallback where it can't arm.
+                            ble.buzz(3)
+                            ble.armStrapAlarm(now / 1000L + REBUZZ_ALARM_LEAD_S)
+                            ble.externalLog(
+                                "Re-buzz: HR back at the sleep floor — buzzed, and armed a one-shot strap alarm ${REBUZZ_ALARM_LEAD_S}s out",
+                            )
+                        }
+                    } else if (rebuzzWatcher.isArmed) {
+                        rebuzzWatcher.disarm()
+                    }
                     if (!store.enabled || store.scheduledDeadlineMs <= 0L) {
                         inAlarmWindow = false
                         return@collect
                     }
-                    val now = System.currentTimeMillis()
                     val inWindow = now in store.scheduledWindowStartMs until store.scheduledDeadlineMs
                     if (inWindow && !inAlarmWindow) sleepWatcher.reset()   // fresh night
                     inAlarmWindow = inWindow
@@ -464,7 +553,7 @@ class WhoopConnectionService : Service() {
                 "Strap connection",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Shown while NOOP keeps your WHOOP connected in the background."
+                description = "Shown while POOP keeps your WHOOP connected in the background."
                 setShowBadge(false)
                 enableVibration(false)
                 setSound(null, null)
@@ -484,10 +573,178 @@ class WhoopConnectionService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * One live-HR tick of the lucid-dream trainer.
+     *
+     * Deliberately thin: it loads the persisted night counters, tracks an approximate sleep onset for
+     * the cycle prior, hands everything to [LucidNightRunner], and buzzes if — and only if — the pure
+     * policy said to. No decision is taken here.
+     */
+    private fun tickLucid(hr: Int, now: Long) {
+        if (!LucidPrefs.nightEnabled(this)) return
+
+        val prefs = LucidPrefs.of(this)
+        val todayKey = java.time.LocalDate.now().toString()
+
+        // A new local date starts a fresh night: counters reset, template reloaded, runner cleared.
+        if (lucidNightKey != todayKey) {
+            lucidNightKey = todayKey
+            lucidRunner.reset()
+            lucidAsleepSinceMs = null
+            lucidAwakeTicks = 0
+            if (prefs.getString(LucidPrefs.NIGHT_KEY, null) != todayKey) {
+                prefs.edit()
+                    .putString(LucidPrefs.NIGHT_KEY, todayKey)
+                    .putInt(LucidPrefs.CUES_TONIGHT, 0)
+                    .putInt(LucidPrefs.CUES_THIS_PERIOD, 0)
+                    .putLong(LucidPrefs.LAST_CUE_AT, 0L)
+                    .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, false)
+                    .apply()
+            }
+            // Restore the spacing clock so a restart mid-night can't let the ramp fire immediately.
+            val lastCue = prefs.getLong(LucidPrefs.LAST_CUE_AT, 0L)
+            lucidRunner.restoreLastCueAt(if (lastCue > 0L) lastCue else null)
+            lucidTemplate = null
+            loadLucidTemplate()
+        }
+
+        // Approximate sleep onset: the first sustained under-ceiling stretch. A few high ticks in a row
+        // (up and about) clear it; one stray spike does not.
+        if (hr > LUCID_SLEEP_CEILING_BPM) {
+            lucidAwakeTicks++
+            if (lucidAwakeTicks >= LUCID_AWAKE_TICKS_TO_CLEAR) lucidAsleepSinceMs = null
+        } else {
+            lucidAwakeTicks = 0
+            if (lucidAsleepSinceMs == null) lucidAsleepSinceMs = now
+        }
+        val minutesAsleep = lucidAsleepSinceMs?.let { ((now - it) / 60_000L).toInt() } ?: 0
+
+        val state = LucidCuePolicy.NightState(
+            cuesThisPeriod = prefs.getInt(LucidPrefs.CUES_THIS_PERIOD, 0),
+            cuesTonight = prefs.getInt(LucidPrefs.CUES_TONIGHT, 0),
+            minutesSinceLastCue = null,   // the runner derives this from its own spacing clock
+            arousalAbortedPeriod = prefs.getBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, false),
+        )
+
+        val tick = lucidRunner.onHeartRate(
+            hr = hr,
+            nowMs = now,
+            floorBpm = nightTrough.troughBpm(now),
+            template = lucidTemplate,
+            minutesAsleep = minutesAsleep,
+            state = state,
+            enabled = true,   // already gated above; the policy re-checks its own copy
+        )
+
+        // Persist whatever the runner decided the counters should now be.
+        prefs.edit()
+            .putInt(LucidPrefs.CUES_THIS_PERIOD, tick.nextState.cuesThisPeriod)
+            .putInt(LucidPrefs.CUES_TONIGHT, tick.nextState.cuesTonight)
+            .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, tick.nextState.arousalAbortedPeriod)
+            .apply()
+
+        if (tick.arousalStoodDown) {
+            ble.externalLog("Lucid: stirred after the last cue — standing down for this REM period")
+        }
+        val strength = tick.cue ?: return
+        prefs.edit().putLong(LucidPrefs.LAST_CUE_AT, now).apply()
+        ble.buzzLucidCue(strength.bursts)
+        ble.externalLog(
+            "Lucid: ${strength.name.lowercase()} cue fired " +
+                "(REM confidence ${"%.2f".format(tick.remConfidence ?: 0.0)}, " +
+                "${tick.nextState.cuesTonight}/${LucidCuePolicy.MAX_CUES_PER_NIGHT} tonight)",
+        )
+    }
+
+    /**
+     * Build the personal REM template from recent scored nights.
+     *
+     * Reads each night's stored hypnogram and the HR underneath it, splits the samples into REM and
+     * non-REM SLEEP (wake epochs are EXCLUDED — an awake stretch is high and unstable, exactly what REM
+     * looks like on these two features, so counting it would poison the REM class), and hands the
+     * per-night summaries to [LiveRemEstimator.learnTemplate], which does the actual learning.
+     *
+     * Returns null on any shortfall. That is the whole safety story for cold start: no template means
+     * the estimator refuses, which means no cue fires.
+     */
+    private suspend fun buildLucidTemplate(): LiveRemEstimator.RemTemplate? {
+        val nowS = System.currentTimeMillis() / 1000L
+        val fromS = nowS - LUCID_TEMPLATE_LOOKBACK_DAYS * 86_400L
+        val sessions = repo.sleepSessionsMerged("my-whoop", fromS, nowS, limit = 200)
+            .filter { !it.stagesJSON.isNullOrBlank() }
+            .takeLast(LUCID_TEMPLATE_MAX_NIGHTS)
+        if (sessions.isEmpty()) return null
+
+        val samples = ArrayList<LiveRemEstimator.NightSample>(sessions.size)
+        for (session in sessions) {
+            val segments = com.noop.ui.parsePersistedSegments(session.stagesJSON) ?: continue
+            val hr = repo.hrSamples("my-whoop", session.startTs, session.endTs, limit = 20_000)
+            if (hr.isEmpty()) continue
+
+            val rem = ArrayList<Double>()
+            val nonRem = ArrayList<Double>()
+            for (sample in hr) {
+                val seg = segments.firstOrNull { sample.ts >= it.start && sample.ts < it.end } ?: continue
+                when (seg.stage) {
+                    "rem" -> rem.add(sample.bpm.toDouble())
+                    // "wake" is deliberately dropped, not bucketed as non-REM.
+                    "light", "deep" -> nonRem.add(sample.bpm.toDouble())
+                }
+            }
+            // The night's own sleeping floor, the same reference the live estimate is measured against.
+            val floor = (rem + nonRem).minOrNull() ?: continue
+            samples.add(LiveRemEstimator.NightSample(remHr = rem, nonRemHr = nonRem, floorBpm = floor))
+        }
+        return LiveRemEstimator.learnTemplate(samples)
+    }
+
+    /**
+     * Learn the personal REM template from scored history. Runs off the main thread; leaves
+     * [lucidTemplate] null on any shortfall, which makes the estimator stand down rather than guess.
+     */
+    private fun loadLucidTemplate() {
+        scope.launch {
+            lucidTemplate = runCatching { buildLucidTemplate() }.getOrNull()
+            if (lucidTemplate == null) {
+                ble.externalLog(
+                    "Lucid: not enough scored nights yet to learn your REM pattern — no cues tonight",
+                )
+            } else {
+                ble.externalLog("Lucid: REM template loaded from ${lucidTemplate?.nights} scored nights")
+            }
+        }
+    }
+
     companion object {
         private const val CHANNEL_ID = "noop_strap_connection"
         private const val NOTIF_ID = 4201
         const val ACTION_STOP = "com.noop.ble.action.STOP_CONNECTION"
+
+        /** How old an alarm-fired stamp may be and still arm the re-buzz watcher. Slightly over the
+         *  watcher's own 30-min watch window: a stamp seen late (service restarted, HR resumed) still
+         *  arms if a re-buzz could still legitimately fire; anything staler (yesterday's alarm) is
+         *  ignored rather than re-armed against a long-gone wake. */
+        /** HR at or below this counts as "asleep" for the lucid cycle prior — the same ceiling
+         *  [SleepWindowWatcher] uses. */
+        /** How far back to look for scored nights when learning the REM template. */
+        private const val LUCID_TEMPLATE_LOOKBACK_DAYS = 30L
+
+        /** Cap on nights folded into the template — recent enough to reflect current physiology. */
+        private const val LUCID_TEMPLATE_MAX_NIGHTS = 14
+
+        /** HR at or below this counts as "asleep" for the lucid cycle prior — the same ceiling
+         *  [SleepWindowWatcher] uses. */
+        private const val LUCID_SLEEP_CEILING_BPM = 90
+
+        /** Consecutive above-ceiling ticks before the sleep-onset clock is cleared. */
+        private const val LUCID_AWAKE_TICKS_TO_CLEAR = 20
+
+        private const val REBUZZ_STAMP_FRESH_MS = 35 * 60_000L
+
+        /** How far out the re-buzz's one-shot firmware alarm is armed. Long enough for the arm write
+         *  to land and the strap to settle; short enough that a false positive (lying still, awake)
+         *  costs one dismissable buzz within the minute rather than a delayed surprise. */
+        private const val REBUZZ_ALARM_LEAD_S = 60L
 
         /**
          * Promote the process to the foreground so the strap stays connected. Safe to call when

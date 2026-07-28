@@ -48,6 +48,22 @@ class SmartAlarmStore(private val prefs: SharedPreferences) {
         get() = prefs.getLong(KEY_WINDOW_START_MS, 0L)
         set(v) = prefs.edit().putLong(KEY_WINDOW_START_MS, v).apply()
 
+    /** Re-buzz on fall-back-asleep: after a wake alarm fires, keep watching the live HR and wake the
+     *  strap again if the user demonstrably drifts back to sleep ([RebuzzWatcher]). Default OFF
+     *  (every automation in NOOP is opt-in). */
+    var rebuzzEnabled: Boolean
+        get() = prefs.getBoolean(KEY_REBUZZ_ENABLED, false)
+        set(v) = prefs.edit().putBoolean(KEY_REBUZZ_ENABLED, v).apply()
+
+    /** Wall-clock epoch (ms) of the most recent alarm FIRE — stamped by BOTH wake paths (the phone's
+     *  [SmartAlarmReceiver] and the strap's firmware alarm via event 57), 0 if none yet. The BLE
+     *  foreground service's collector watches this stamp to arm the re-buzz watcher; persisting it
+     *  (rather than an in-memory flag) survives the receiver and the service living through separate
+     *  process lifecycle events. */
+    var lastFiredAtMs: Long
+        get() = prefs.getLong(KEY_LAST_FIRED_MS, 0L)
+        set(v) = prefs.edit().putLong(KEY_LAST_FIRED_MS, v).apply()
+
     companion object {
         private const val PREFS = "noop_smart_alarm"
         private const val KEY_ENABLED = "alarm.enabled"
@@ -55,6 +71,8 @@ class SmartAlarmStore(private val prefs: SharedPreferences) {
         private const val KEY_WINDOW = "alarm.windowMinutes"
         private const val KEY_DEADLINE_MS = "alarm.scheduledDeadlineMs"
         private const val KEY_WINDOW_START_MS = "alarm.scheduledWindowStartMs"
+        private const val KEY_REBUZZ_ENABLED = "alarm.rebuzzEnabled"
+        private const val KEY_LAST_FIRED_MS = "alarm.lastFiredAtMs"
 
         const val MINUTES_PER_DAY = 24 * 60
         const val DEFAULT_TARGET = 6 * 60 + 30   // 06:30

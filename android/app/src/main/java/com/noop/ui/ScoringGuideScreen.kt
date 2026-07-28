@@ -51,7 +51,7 @@ import kotlin.math.roundToInt
 
 // MARK: - ScoringGuideScreen (ported from Strand/Screens/ScoringGuideView.swift)
 //
-// "How your scores work" — the one honest explainer for NOOP's three daily scores
+// "How your scores work" — the one honest explainer for POOP's three daily scores
 // (Charge, Effort, Rest) and the confidence labels. Presented as a sheet, mirroring
 // WhatsNewSheet's presentation + dismiss + layout idiom: a fixed header with a close
 // button, a scrollable column of cards, and a "Got it" footer. Reachable from
@@ -192,7 +192,7 @@ fun ScoringGuideScreen(
                     body = "Led by your heart-rate variability (HRV) measured against your own " +
                         "personal baseline, plus resting heart rate, last night's Rest, breathing " +
                         "rate, and a skin-temperature signal (an early illness or overreach flag). " +
-                        "Higher HRV versus your baseline means more Charge. NOOP needs a few nights " +
+                        "Higher HRV versus your baseline means more Charge. POOP needs a few nights " +
                         "to learn your baseline first. Until then you'll see “Calibrating”.",
                     vsWhoop = "Same core idea as WHOOP's Recovery % (HRV-led recovery), but our " +
                         "weighting and baseline maths are our own, and openly documented.",
@@ -202,7 +202,7 @@ fun ScoringGuideScreen(
                 ScoreCard(
                     section = ScoreSection.EFFORT,
                     headline = "Effort: how hard did your heart work?",
-                    body = "Your cardiovascular load. NOOP turns every second of heart rate into a " +
+                    body = "Your cardiovascular load. POOP turns every second of heart rate into a " +
                         "training-impulse using heart-rate-reserve zones (Karvonen), weights time in " +
                         "harder zones more heavily (Edwards / Banister), and places it on a " +
                         "logarithmic 0-100 scale, so easy days sit low and an all-out day approaches " +
@@ -437,7 +437,7 @@ private fun ConfidenceCard() {
             Text(
                 uiString(R.string.l10n_scoring_guide_screen_every_score_carries_a_small_honesty_e5b722eb) +
                     "learning your baseline, or doesn't have enough data yet. Building means there's " +
-                    "enough to show, but it's thin. Solid means full inputs are present. When NOOP " +
+                    "enough to show, but it's thin. Solid means full inputs are present. When POOP " +
                     "can't compute a score honestly, it shows nothing rather than a fake number.",
                 style = NoopType.subhead,
                 color = Palette.textSecondary,

@@ -88,6 +88,41 @@ class SourceCoordinatorAdoptionTest {
         override suspend fun deleteDayOwnershipFor(deviceId: String) {
             owners.entries.removeIf { it.value.deviceId == deviceId }
         }
+        // #771 adopt-serial surface. Registry-modelled pieces mirror the real table ops (this test
+        // exercises adoption, so the dayOwnership re-key mutates real fake state); the sample-table
+        // re-keys are recorded-nowhere no-ops like the delete*For stubs above.
+        override suspend fun setModel(id: String, model: String) {
+            devices[id]?.let { devices[id] = it.copy(model = model) }
+        }
+        override suspend fun pairedDevice(id: String): PairedDeviceRow? = devices[id]
+        override suspend fun deletePairedDeviceRow(id: String) { devices.remove(id) }
+        override suspend fun deleteDeviceRow(id: String) {}
+        override suspend fun reKeyHr(from: String, to: String) {}
+        override suspend fun reKeyRr(from: String, to: String) {}
+        override suspend fun reKeySpo2(from: String, to: String) {}
+        override suspend fun reKeySkinTemp(from: String, to: String) {}
+        override suspend fun reKeyResp(from: String, to: String) {}
+        override suspend fun reKeyGravity(from: String, to: String) {}
+        override suspend fun reKeySteps(from: String, to: String) {}
+        override suspend fun reKeyPpgHr(from: String, to: String) {}
+        override suspend fun reKeyPpgWaveform(from: String, to: String) {}
+        override suspend fun reKeyRawImu(from: String, to: String) {}
+        override suspend fun reKeyEvents(from: String, to: String) {}
+        override suspend fun reKeyBattery(from: String, to: String) {}
+        override suspend fun reKeyDailyMetrics(from: String, to: String) {}
+        override suspend fun reKeySleepSessions(from: String, to: String) {}
+        override suspend fun reKeyJournal(from: String, to: String) {}
+        override suspend fun reKeyWorkouts(from: String, to: String) {}
+        override suspend fun reKeyAppleDaily(from: String, to: String) {}
+        override suspend fun reKeyMetricSeries(from: String, to: String) {}
+        override suspend fun reKeyDayOwnership(from: String, to: String) {
+            for ((day, row) in owners) if (row.deviceId == from) owners[day] = row.copy(deviceId = to)
+        }
+        override suspend fun reKeySleepStates(from: String, to: String) {}
+        override suspend fun reKeyLabMarkers(from: String, to: String) {}
+        override suspend fun reKeyLiveSessions(from: String, to: String) {}
+        override suspend fun reKeyDismissedWorkouts(from: String, to: String) {}
+        override suspend fun reKeyDismissedSleeps(from: String, to: String) {}
     }
 
     private fun registryWith(dao: FakeRegistryDao) = DeviceRegistry(

@@ -38,7 +38,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
-// MARK: - HowNoopWorksScreen ("How NOOP works" primer)
+// MARK: - HowNoopWorksScreen ("How POOP works" primer)
 //
 // COMPONENT 5 of the sleep-guidance / explainability layer
 // (docs/superpowers/specs/2026-06-20-sleep-guidance-explainability.md): a short,
@@ -67,7 +67,7 @@ private enum class PrimerSection(
 ) {
     SLEEP(
         title = uiString(R.string.l10n_how_noop_works_screen_how_your_sleep_is_sorted_6a8e82e0),
-        body = "NOOP picks your main sleep as your longest real block, and (once it has " +
+        body = "POOP picks your main sleep as your longest real block, and (once it has " +
             "learned your usual hours) the one nearest your normal sleep time. Everything " +
             "else that day is a nap. You can always edit bed and wake times.",
         icon = Icons.Filled.Bedtime,
@@ -79,7 +79,7 @@ private enum class PrimerSection(
             "counted as nights of 4 on the ring), and keeps sharpening over your first couple of weeks. " +
             "On a WHOOP 5 or MG the strap banks little history, so that count can sit at 0 of 4 until you " +
             "have worn it across a few nights. That's the strap's sync limit, not a fault. " +
-            "Before there's a number, NOOP shows what it can without faking one.",
+            "Before there's a number, POOP shows what it can without faking one.",
         icon = Icons.Filled.Insights,
     ),
     SCORE_RECIPE(
@@ -96,13 +96,13 @@ private enum class PrimerSection(
     ),
     RECORDING(
         title = uiString(R.string.l10n_how_noop_works_screen_what_recording_means_b896c422),
-        body = "When your strap is connected NOOP is saving data live. \"Last synced\" tells " +
+        body = "When your strap is connected POOP is saving data live. \"Last synced\" tells " +
             "you how fresh it is. If it says \"Not recording\", reconnect.",
         icon = Icons.Filled.Sensors,
     ),
     PROVENANCE(
         title = uiString(R.string.l10n_how_noop_works_screen_where_your_numbers_come_from_e169963a),
-        body = "A badge shows whether a number was scored on-device by NOOP, or imported " +
+        body = "A badge shows whether a number was scored on-device by POOP, or imported " +
             "from Whoop or Apple Health.",
         icon = Icons.Filled.Verified,
     );
@@ -119,7 +119,7 @@ private enum class PrimerSection(
 }
 
 /**
- * The "How NOOP works" primer sheet. [onClose] dismisses. Pure presentation — it reads
+ * The "How POOP works" primer sheet. [onClose] dismisses. Pure presentation — it reads
  * nothing and writes nothing; every line is static approved copy.
  */
 @Composable
@@ -161,7 +161,7 @@ fun HowNoopWorksScreen(onClose: () -> Unit) {
     }
 }
 
-// MARK: - Header ("How NOOP works" + tagline + close X)
+// MARK: - Header ("How POOP works" + tagline + close X)
 
 @Composable
 private fun Header(onClose: () -> Unit) {

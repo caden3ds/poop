@@ -105,39 +105,24 @@ import kotlin.math.sin
  * near-neutral gold wash. Drawn with `drawBehind` so the animation/recomposition of the card's
  * content never reaches this surface subtree. Mirrors StrandDesign's FrostedCardSurface.
  */
-/** App-wide card-surface opacity (0f = fully see-through, 1f = solid), driven by the "Card transparency"
- *  setting. Reactive (a mutableState) so the Settings slider live-previews; initialised from NoopPrefs at
- *  app start via [init]. Only the card SURFACE (fill + border + wash) fades — the card's CONTENT is drawn
- *  above and stays fully readable over the background. */
-object CardAppearance {
-    var opacity by mutableStateOf(1f)
-    fun init(context: Context) {
-        opacity = (NoopPrefs.cardOpacityPercent(context) / 100f).coerceIn(0f, 1f)
-    }
-}
-
+/*
+ * Card-transparency support was removed with the Appearance settings section that was its only control.
+ *
+ * It mattered more than it looked: reading its reactive opacity forced this modifier to be `composed {}`,
+ * which allocates per composition and opts every card OUT of Compose's modifier reuse and skipping. Every
+ * card in the app uses this, so it was paid on every scroll frame. It is now a plain stateless Modifier.
+ */
 fun Modifier.frostedCardSurface(
     tint: Color? = null,
     cornerRadius: Dp = Metrics.cardRadius,
     washStrength: Float = 1f,
-): Modifier = composed {
-    // "Card transparency" setting: scale the whole glass surface (fill + border + wash) by the user's
-    // opacity so cards fade toward the background. Reading the reactive value here makes the slider
-    // live-preview. Content drawn above the surface is unaffected, so numbers/labels stay readable.
-    val op = CardAppearance.opacity
-    this
-        // Elevation idiom: DARK is flat (the hairline + hue carry the edge). LIGHT raises the white card
-        // off the warm-paper canvas with a soft drop shadow — the hairline alone is too faint on paper.
-        .then(
-            if (Palette.isLight)
-                Modifier.shadow(elevation = (6f * op).dp, shape = RoundedCornerShape(cornerRadius), clip = false)
-            else Modifier
-        )
+): Modifier = this
+        // Elevation idiom: flat. The hairline + hue carry the card edge; no drop shadow.
         .drawBehind {
             val radiusPx = cornerRadius.toPx()
             val corner = androidx.compose.ui.geometry.CornerRadius(radiusPx, radiusPx)
-            val fill = Palette.surfaceRaised.copy(alpha = Palette.surfaceRaised.alpha * op)
-            val border = Palette.hairline.copy(alpha = Palette.hairline.alpha * op)
+            val fill = Palette.surfaceRaised
+            val border = Palette.hairline
 
             if (tint == null) {
                 // NEUTRAL card (iOS FrostedCardSurface tint == nil): a FLAT raised surface — no vertical
@@ -154,8 +139,8 @@ fun Modifier.frostedCardSurface(
                 drawRoundRect(
                     brush = Brush.linearGradient(
                         colorStops = arrayOf(
-                            0.0f to tint.copy(alpha = 0.05f * washStrength * op),
-                            0.5f to tint.copy(alpha = 0.015f * washStrength * op),
+                            0.0f to tint.copy(alpha = 0.05f * washStrength),
+                            0.5f to tint.copy(alpha = 0.015f * washStrength),
                             1.0f to Color.Transparent,
                         ),
                         start = Offset(0f, 0f),
@@ -167,7 +152,6 @@ fun Modifier.frostedCardSurface(
                 drawRoundRect(color = border, cornerRadius = corner, style = Stroke(width = 1.dp.toPx()))
             }
         }
-}
 
 // MARK: - NoopCard — the one card surface (Titanium & Gold frosted card, 16dp radius)
 //
@@ -399,12 +383,12 @@ fun StatePill(
 @Composable
 fun SourceBadge(text: String, tint: Color = Palette.accent, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(50)
-    Text(
-        text = text.uppercase(),
-        style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.5.sp),
-        color = tint,
-        maxLines = 1,                          // #74: e.g. "ON-DEVICE" stays on one line, never wraps the hero
-        overflow = TextOverflow.Ellipsis,
+    // The capsule is a Box that CENTRES its label. Previously the label was the styled Text itself with a
+    // `heightIn(min = sourceBadgeHeight)`: whenever the min height exceeded the line box (the normal case
+    // at default font scale), the glyphs sat against the TOP of the capsule instead of on its optical
+    // centre, so the pill read as mis-set. Centring in a container fixes it at every font scale and keeps
+    // the capsule's grow-don't-clip behaviour.
+    Box(
         modifier = modifier
             // Preserve the canonical compact height at the default font scale, but grow instead of clipping
             // when Android's font scaling makes the single-line label taller.
@@ -413,7 +397,16 @@ fun SourceBadge(text: String, tint: Color = Palette.accent, modifier: Modifier =
             .background(tint.copy(alpha = 0.14f))
             .border(1.dp, tint.copy(alpha = 0.30f), shape)
             .padding(horizontal = Metrics.space8),
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text.uppercase(),
+            style = NoopType.overline.copy(fontSize = 10.sp, letterSpacing = 0.5.sp),
+            color = tint,
+            maxLines = 1,                      // #74: e.g. "ON-DEVICE" stays on one line, never wraps the hero
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 // MARK: - TrendChip — a small tinted delta pill with a direction arrow.
@@ -612,8 +605,7 @@ fun <T> SegmentedPillControl(
             // chrome, not gold). Unselected stays clear with tertiary text; disabled dims further.
             val pillShape = RoundedCornerShape(50)
             val pillBg = if (selected) {
-                if (Palette.isLight) Modifier.background(Palette.accent, pillShape)
-                else Modifier.background(Brush.linearGradient(*Palette.goldGradient.toTypedArray()), pillShape)
+                Modifier.background(Brush.linearGradient(*Palette.goldGradient.toTypedArray()), pillShape)
             } else {
                 Modifier
             }
@@ -631,10 +623,13 @@ fun <T> SegmentedPillControl(
                 Text(
                     text = label(item),
                     style = NoopType.captionNumber,
-                    maxLines = if (adaptsToAvailableWidth) 1 else Int.MAX_VALUE,
+                    // A pill label NEVER wraps. It used to when the control wasn't in equal-width mode,
+                    // which broke short labels worst of all: the 6-item HR-window row squeezed "1h" thin
+                    // enough to stack the "1" above the "h". One line, clipped if it truly cannot fit.
+                    maxLines = 1,
+                    softWrap = false,
                     overflow = if (adaptsToAvailableWidth) TextOverflow.Ellipsis else TextOverflow.Clip,
                     color = when {
-                        selected && Palette.isLight -> androidx.compose.ui.graphics.Color.White
                         selected -> Palette.goldDeepText
                         !itemEnabled -> Palette.textTertiary.copy(alpha = 0.45f)
                         else -> Palette.textTertiary
@@ -663,7 +658,7 @@ fun <T> SegmentedPillControl(
 // params (defaulted, so every existing call site is untouched) let the RecoveryRing brand
 // glyph diverge: [startDeg]/[spanDeg] override the arc (it uses −90° / ~288° = open ~80%
 // ring, clockwise), [coreDot] paints a SOLID gold core dot at the centre, and [wordmark]
-// stamps a micro ALL-CAPS "NOOP" above the number. Mirrors StrandDesign/BevelGauge.swift.
+// stamps a micro ALL-CAPS "POOP" above the number. Mirrors StrandDesign/BevelGauge.swift.
 
 @Composable
 fun BevelGauge(
@@ -752,10 +747,8 @@ fun BevelGauge(
                     val sweepStroke = Stroke(width = stroke, cap = StrokeCap.Round)
 
                     // Outer bloom — a soft, lower-opacity wide arc (drawn first, under the track).
-                    // A glow only reads on the dark canvas; on the white light card it just smears the
-                    // edge, so it's suppressed there (the deepened arc carries the ring on its own).
                     // Drawn at the restrained, static [bloomOpacity] (≈0.05–0.18) — crisp, not glowing.
-                    if (animatedFraction > 0.001f && !Palette.isLight) {
+                    if (animatedFraction > 0.001f) {
                         drawArc(
                             brush = sweep,
                             startAngle = startDeg,
@@ -884,7 +877,7 @@ fun BevelGauge(
 // so the Rest hero can show "Rest 87" while Charge keeps the bare number — same shape as
 // the macOS RecoveryRing.valueFormat. The state word + tip colour sample the recovery (gold)
 // ramp. Unlike the Bevel 240° gauge it draws the BRAND GLYPH: an open ~80% ring starting at
-// −90° (12 o'clock) clockwise, a solid gold centre core dot and a micro "NOOP" wordmark.
+// −90° (12 o'clock) clockwise, a solid gold centre core dot and a micro "POOP" wordmark.
 
 // MARK: - GlowRing — crisp WHOOP-style score ring (Compose parity with iOS StrandDesign.GlowRing, #23)
 //
@@ -967,14 +960,10 @@ fun GlowRing(
                     // track — exactly like the iOS GlowRing's empty state.
                     if (animFraction > 0.001f) {
                         // Tight glow — a wider, low-alpha arc under the crisp one (minSdk-safe, no RenderEffect).
-                        // Gated on the dark canvas only, mirroring iOS AdditiveBloom hiding on the light field
-                        // (on white it just smears the edge); the crisp arc carries the ring on its own there.
-                        if (!Palette.isLight) {
-                            drawArc(
-                                color = color.copy(alpha = 0.45f), startAngle = -90f, sweepAngle = sweep, useCenter = false,
-                                topLeft = tl, size = arcSize, style = Stroke(width = stroke * 1.5f, cap = StrokeCap.Round),
-                            )
-                        }
+                        drawArc(
+                            color = color.copy(alpha = 0.45f), startAngle = -90f, sweepAngle = sweep, useCenter = false,
+                            topLeft = tl, size = arcSize, style = Stroke(width = stroke * 1.5f, cap = StrokeCap.Round),
+                        )
                         // The crisp, solid arc — from 12 o'clock clockwise.
                         drawArc(
                             color = color, startAngle = -90f, sweepAngle = sweep, useCenter = false,
@@ -1018,7 +1007,7 @@ fun RecoveryRing(
         startDeg = -90f,
         spanDeg = 288f,
         coreDot = Palette.gold,
-        wordmark = "NOOP",
+        wordmark = "POOP",
         modifier = modifier,
     )
 }
@@ -1103,10 +1092,8 @@ fun ScenicHeroBackground(
                 )
             }
 
-            // Deterministic starfield — fixed positions/sizes so it can't flicker. A night-sky field
-            // only belongs on the dark hero; on the warm-paper light field it reads as dirt, so it's
-            // suppressed there (the radial + domain bloom carry the light hero alone).
-            if (!Palette.isLight) {
+            // Deterministic starfield — fixed positions/sizes so it can't flicker.
+            run {
                 val wi = maxOf(1, w.toInt())
                 val topBand = maxOf(1, (h * 0.55f).toInt())
                 for (i in 0 until starCount) {
@@ -1157,108 +1144,43 @@ fun ScreenScaffold(
     topPadding: Dp = 28.dp,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    // Optional full-bleed view drawn behind the scroll content at the TOP of the screen (e.g. Today's
-    // day-cycle scene). Defaults to null so other screens stay on the flat canvas; null draws nothing.
-    // Mirrors the iOS ScreenScaffold `topBackground` slot — the scene is a SCREEN-level backdrop the
-    // cards float OVER, not a card-clipped hero atmosphere.
-    topBackground: (@Composable () -> Unit)? = null,
-    // When true, the [topBackground] fills the WHOLE viewport instead of the top band — the
-    // "sky behind cards" mode, identical to [LazyScreenScaffold]'s flag. The band container's
-    // status-bar offset would otherwise shift a full-height backdrop up and leave the bottom of
-    // the screen on plain canvas (the "sky doesn't reach the lower cards" report on the vital
-    // details). Defaulted, so every existing caller is byte-for-byte untouched.
-    fullBleedBackground: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    // The scrolling content column. Its OUTER modifier differs by path: with no topBackground it is the
-    // original root Column (the caller's `modifier` + an opaque-canvas background — byte-for-byte the old
-    // layout); with a topBackground the canvas + scene paint in the wrapping Box's background (below) and
-    // the column stays TRANSPARENT so the scene shows through behind the scroll content. Pulled out so the
-    // two paths share one body.
-    val columnModifier: Modifier =
-        if (topBackground == null) {
-            modifier.fillMaxWidth().background(Palette.surfaceBase)
-        } else {
-            Modifier.fillMaxWidth()
-        }
-    val column: @Composable () -> Unit = {
-        Column(
-            modifier = columnModifier
-                .verticalScroll(rememberScrollState())
-                .padding(start = 28.dp, end = 28.dp, top = topPadding, bottom = 28.dp),
-            // #765: one shared inter-card spacing token (was a bare `20.dp`), so the eager + lazy scaffolds
-            // and every screen through them keep the SAME uniform gap between top-level cards.
-            verticalArrangement = Arrangement.spacedBy(Metrics.screenRowSpacing),
-        ) {
-            // Compact top bar: an optional LEADING action (e.g. the Today profile avatar, mirroring iOS's
-            // avatar-leading header), the screen title/subtitle, then an optional trailing action (e.g. the
-            // Support heart on Today). Mirrors the iOS ScreenScaffold slots from the WHOOP redesign (#23).
-            // When BOTH title and subtitle are null the large-title header block is omitted entirely, so a
-            // screen can supply its own custom header in `content` (iOS Today's compact top bar) — mirroring
-            // the iOS ScreenScaffold which only renders the header `if title != nil || subtitle != nil`.
-            if (title != null || subtitle != null) {
-                Row(verticalAlignment = Alignment.Top) {
-                    if (leading != null) {
-                        leading()
-                        Spacer(Modifier.width(12.dp))
-                    }
-                    Column(
-                        modifier = Modifier.weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        if (title != null) {
-                            Text(title, style = NoopType.title1, color = Palette.textPrimary)
-                        }
-                        if (subtitle != null) {
-                            Text(subtitle, style = NoopType.subhead, color = Palette.textSecondary)
-                        }
-                    }
-                    if (trailing != null) trailing()
+    Column(
+        modifier = modifier.fillMaxWidth().background(Palette.surfaceBase)
+            .verticalScroll(rememberScrollState())
+            .padding(start = 28.dp, end = 28.dp, top = topPadding, bottom = 28.dp),
+        // #765: one shared inter-card spacing token (was a bare `20.dp`), so the eager + lazy scaffolds
+        // and every screen through them keep the SAME uniform gap between top-level cards.
+        verticalArrangement = Arrangement.spacedBy(Metrics.screenRowSpacing),
+    ) {
+        // Compact top bar: an optional LEADING action (e.g. the Today profile avatar, mirroring iOS's
+        // avatar-leading header), the screen title/subtitle, then an optional trailing action (e.g. the
+        // Support heart on Today). Mirrors the iOS ScreenScaffold slots from the WHOOP redesign (#23).
+        // When BOTH title and subtitle are null the large-title header block is omitted entirely, so a
+        // screen can supply its own custom header in `content` (iOS Today's compact top bar) — mirroring
+        // the iOS ScreenScaffold which only renders the header `if title != nil || subtitle != nil`.
+        if (title != null || subtitle != null) {
+            Row(verticalAlignment = Alignment.Top) {
+                if (leading != null) {
+                    leading()
+                    Spacer(Modifier.width(12.dp))
                 }
-            }
-            content()
-        }
-    }
-
-    if (topBackground == null) {
-        // Unchanged path: the column IS the root, with the caller's `modifier` + opaque canvas background
-        // applied to it directly — byte-for-byte the previous layout (no wrapping Box).
-        column()
-    } else {
-        // Scene-backed path (Today): the wrapping Box paints the flat canvas, then the SCREEN-level scene
-        // backdrop over it, anchored to the TOP and bled UP behind the status bar so it reads as a
-        // full-bleed scenic header; the (transparent) scroll content floats OVER both. Mirrors the iOS
-        // scaffold's `.background(alignment: .top){ ZStack { surfaceBase; topBackground }.ignoresSafeArea() }`.
-        // Pull the scene up by the status-bar inset (the Scaffold already pushed this content below the
-        // bar), so the scene bleeds behind the status bar rather than starting under it.
-        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
-            Box(
-                modifier = (
-                    if (fullBleedBackground) {
-                        // Sky-behind-cards: the backdrop fills the whole viewport (no band offset), so
-                        // the transparent content scrolls OVER a full-height sky. Identical to the lazy
-                        // twin's fullBleedBackground container.
-                        Modifier.fillMaxSize()
-                    } else {
-                        Modifier
-                            .fillMaxWidth()
-                            .align(Alignment.TopCenter)
-                            .offset(y = -statusBarTop)
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (title != null) {
+                        Text(title, style = NoopType.title1, color = Palette.textPrimary)
                     }
-                    )
-                    // PERF (#scroll-jank): promote the static scene backdrop to its OWN compositing layer so
-                    // its gradient + bitmap rasterise ONCE into a render node and are reused as a texture on
-                    // every scroll frame, instead of the parent re-issuing the scene's `drawBehind` draw each
-                    // time the (sibling) scroll column composites over it. The backdrop reads no scroll state
-                    // and never moves, so an empty `graphicsLayer {}` is purely an isolation hint —
-                    // appearance-identical. Mirrors keeping the iOS scene as a static screen-level backdrop.
-                    .graphicsLayer { },
-            ) {
-                topBackground()
+                    if (subtitle != null) {
+                        Text(subtitle, style = NoopType.subhead, color = Palette.textSecondary)
+                    }
+                }
+                if (trailing != null) trailing()
             }
-            column()
         }
+        content()
     }
 }
 
@@ -1279,9 +1201,6 @@ fun LazyScreenScaffold(
     title: String?,
     subtitle: String? = null,
     modifier: Modifier = Modifier,
-    // Mirrors ScreenScaffold: a screen with a scene-backed header (Today-style) can tighten the gap
-    // above its first row, and supply leading/trailing header actions + a screen-level scene backdrop.
-    // All defaulted, so the existing flat callers (Intelligence) are byte-for-byte untouched.
     topPadding: Dp = 28.dp,
     // The inter-row vertical spacing between top-level items. Defaults to the shared `screenRowSpacing`
     // (20dp) so every existing caller is byte-for-byte untouched; the liquid Today passes a tighter value
@@ -1290,14 +1209,6 @@ fun LazyScreenScaffold(
     rowSpacing: Dp = Metrics.screenRowSpacing,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
-    // Optional full-bleed scene drawn behind the scroll content at the TOP of the screen — the SAME slot
-    // contract as ScreenScaffold.topBackground. Null draws nothing (the flat-canvas path). When supplied,
-    // the scene paints in the wrapping Box (promoted to its own compositing layer) and the LazyColumn is
-    // transparent so the scene shows through behind the rows. Mirrors the iOS scaffold's topBackground.
-    topBackground: (@Composable () -> Unit)? = null,
-    // When true, the [topBackground] fills the WHOLE scaffold (viewport) instead of the top band — the
-    // "sky behind cards" mode, so a full-height backdrop shows behind every scrolling row.
-    fullBleedBackground: Boolean = false,
     // #today-layout: the list state, hoisted so a caller can read item positions / scroll programmatically
     // (Today's hold-to-drag section reorder needs layoutInfo + scrollBy). Defaulted, so every existing
     // caller is byte-for-byte untouched.
@@ -1333,19 +1244,11 @@ fun LazyScreenScaffold(
             null
         }
 
-    // The lazy list itself. Its background + the contentPadding differ by path so the scene-backed list
-    // is transparent (scene shows through) while keeping the SAME 28dp screen inset + shared row spacing as
-    // the eager ScreenScaffold. The top inset honours [topPadding] (so a custom-header screen can tighten
+    // The lazy list itself: the 28dp screen inset + shared row spacing match the eager ScreenScaffold so
+    // the two read identically. The top inset honours [topPadding] (so a custom-header screen can tighten
     // the gap above the first row, exactly like ScreenScaffold's `padding(top = topPadding)`).
-    val listModifier: Modifier =
-        if (topBackground == null) {
-            modifier.fillMaxWidth().background(Palette.surfaceBase)
-        } else {
-            Modifier.fillMaxWidth()
-        }
-    val list: @Composable () -> Unit = {
-        LazyColumn(
-            modifier = listModifier,
+    LazyColumn(
+            modifier = modifier.fillMaxWidth().background(Palette.surfaceBase),
             state = listState,
             contentPadding = PaddingValues(start = 28.dp, top = topPadding, end = 28.dp, bottom = 28.dp),
             // #765: the shared inter-card spacing token by default (Today/Explore + the eager screens share
@@ -1357,35 +1260,6 @@ fun LazyScreenScaffold(
                 item { header() }
             }
             content()
-        }
-    }
-
-    if (topBackground == null) {
-        list()
-    } else {
-        // Scene-backed path: the wrapping Box paints the flat canvas + the screen-level scene backdrop
-        // (anchored TOP, bled up behind the status bar), and the transparent LazyColumn floats over both.
-        // Identical scene treatment to ScreenScaffold — including promoting the static backdrop to its own
-        // compositing layer (an empty graphicsLayer {}) so the scene rasterises once and replays as a
-        // texture on every scroll frame instead of being re-issued under the scrolling rows.
-        val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-        Box(modifier = modifier.fillMaxSize().background(Palette.surfaceBase)) {
-            Box(
-                modifier = (
-                    if (fullBleedBackground) {
-                        // Sky-behind-cards: the backdrop fills the whole viewport (covers under the status
-                        // bar already), so the transparent rows scroll OVER a full-height sky.
-                        Modifier.fillMaxSize()
-                    } else {
-                        // Default: a top-anchored band bled up behind the status bar.
-                        Modifier.fillMaxWidth().align(Alignment.TopCenter).offset(y = -statusBarTop)
-                    }
-                    ).graphicsLayer { },
-            ) {
-                topBackground()
-            }
-            list()
-        }
     }
 }
 

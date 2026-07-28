@@ -92,168 +92,45 @@ data class PaletteTokens(
     val tipCore: Color,
 )
 
-// WHOOP-reset dark palette (gold killed 2026-06-22). Values match StrandPalette.swift's DARK
-// Titanium column byte-for-byte: blue-grey canvas, WHOOP red→yellow→green recovery, green Charge,
-// blue Effort, slate Rest, amber Stress. NO gold anywhere — accent/gold tokens point to WHOOP blue.
+// One UI 8 dark scheme.
+//
+// The thing that makes One UI dark READ as One UI is CONTRAST BETWEEN LAYERS, not uniform darkness:
+// a true-black canvas, cards that step up to a clearly lighter grey, and EMPHASISED controls that
+// invert entirely — light grey fill with DARK text. Dials and sliders run a dark-grey track under a
+// light fill. The first cut of this palette missed that: every layer sat within a few points of the
+// others, so the app read as flat dark-on-dark. These values restore the steps.
+//
+// `accent` is a LIGHT grey on purpose: it is used as a FILL for buttons/pills, and `goldDeepText` is
+// the near-black that sits on top of it. That pairing is the One UI primary-button idiom.
 val DarkTokens = PaletteTokens(
-    surfaceBase = Color(0xFF121518), surfaceRaised = Color(0xFF25292C), surfaceOverlay = Color(0xFF1C1F26),
-    surfaceInset = Color(0xFF1F2229), hairline = Color(0xFF21304A), hairlineStrong = Color(0xFF2E3C57),
-    textPrimary = Color(0xFFF4F6F8), textSecondary = Color(0xFFC8CFD8), textTertiary = Color(0xFF8A94A4),
-    glowAmbient = Color(0xFF3A2D0A),
-    accent = Color(0xFF60A0E0), accentHover = Color(0xFF8FBEEC), accentMuted = Color(0xFF16233A), focusRing = Color(0xFF60A0E0),
-    recovery000 = Color(0xFFE0463C), recovery030 = Color(0xFFE8743C), recovery055 = Color(0xFFF9DF4A),
-    recovery078 = Color(0xFF8FD86A), recovery100 = Color(0xFF03E095),
-    strain000 = Color(0xFF9C5A14), strain033 = Color(0xFFC2762A), strain066 = Color(0xFFD98A3D), strain100 = Color(0xFFF0A85A),
-    sleepAwake = Color(0xFFC2CCDA), sleepLight = Color(0xFF4A90E2), sleepDeep = Color(0xFF2F6FCB), sleepREM = Color(0xFF6FA8E8),
-    zone1 = Color(0xFF4A90E2), zone2 = Color(0xFF3FA9C9), zone3 = Color(0xFFE8B84B), zone4 = Color(0xFFD98A3D), zone5 = Color(0xFFE0662F),
-    statusPositive = Color(0xFF03E095), statusWarning = Color(0xFFF0A020), statusCritical = Color(0xFFE0662F),
-    metricCyan = Color(0xFF3FA9C9), metricPurple = Color(0xFF4A90E2), metricAmber = Color(0xFFD98A3D), metricRose = Color(0xFFE0662F),
-    chargeColor = Color(0xFF03E095), chargeDeep = Color(0xFF0B9D62), chargeBright = Color(0xFF6BF0B4), chargeGlow = Color(0xFF03E095),
-    effortColor = Color(0xFF4090E0), effortDeep = Color(0xFF2A6FB0), effortBright = Color(0xFF74B6F0), effortGlow = Color(0xFF4090E0),
-    restColor = Color(0xFF83A0B8), restDeep = Color(0xFF2F6FCB), restBright = Color(0xFF6FA8E8), restGlow = Color(0xFF4A90E2),
-    stressColor = Color(0xFFF0A020), stressDeep = Color(0xFF4A90E2), stressBright = Color(0xFFE0662F), stressGlow = Color(0xFFF0A020),
-    scenicCenter = Color(0xFF1C2128), scenicEdge = Color(0xFF121518), scenicStar = Color(0xFFC8CFD8),
-    cardFillTop = Color(0xFF15243C), cardFillBottom = Color(0xFF0B1424),
-    gold = Color(0xFF60A0E0), goldLight = Color(0xFF9FC8F0), goldDeep = Color(0xFF3A78C8),
-    goldDeepText = Color(0xFFFFFFFF), signalYellow = Color(0xFFFFD63D),
-    titaniumTop = Color(0xFFF1F3F5), titaniumMid = Color(0xFFC9CFD4), titaniumLow = Color(0xFF969DA4), titaniumDeep = Color(0xFF6B737B),
+    // Canvas is true black; each surface above it steps up a clear notch.
+    surfaceBase = Color(0xFF000000), surfaceRaised = Color(0xFF1C1C1E), surfaceOverlay = Color(0xFF2C2C2E),
+    surfaceInset = Color(0xFF141416), hairline = Color(0xFF39393D), hairlineStrong = Color(0xFF54545A),
+    textPrimary = Color(0xFFFFFFFF), textSecondary = Color(0xFFB4B4BA), textTertiary = Color(0xFF7C7C84),
+    glowAmbient = Color(0xFF1C1C1E),
+    // Emphasised fill: light grey with near-black text on top (goldDeepText).
+    accent = Color(0xFFE6E6EA), accentHover = Color(0xFFFFFFFF), accentMuted = Color(0xFF2C2C2E), focusRing = Color(0xFFE6E6EA),
+    recovery000 = Color(0xFFE2574C), recovery030 = Color(0xFFE08A4A), recovery055 = Color(0xFFE0C455),
+    recovery078 = Color(0xFFA6D97F), recovery100 = Color(0xFF5FD79A),
+    strain000 = Color(0xFF4C7192), strain033 = Color(0xFF5F8CB2), strain066 = Color(0xFF77A8CE), strain100 = Color(0xFF9AC6E6),
+    sleepAwake = Color(0xFF9E9EA6), sleepLight = Color(0xFF7594BE), sleepDeep = Color(0xFF465C84), sleepREM = Color(0xFF9DB4DC),
+    zone1 = Color(0xFF7594BE), zone2 = Color(0xFF63A4B2), zone3 = Color(0xFFCBB86E), zone4 = Color(0xFFCE9663), zone5 = Color(0xFFCE7563),
+    statusPositive = Color(0xFF5FD79A), statusWarning = Color(0xFFE0B25F), statusCritical = Color(0xFFE07563),
+    metricCyan = Color(0xFF63A4B2), metricPurple = Color(0xFF9095BE), metricAmber = Color(0xFFCE9663), metricRose = Color(0xFFCE7584),
+    chargeColor = Color(0xFF5FD79A), chargeDeep = Color(0xFF2F8F5F), chargeBright = Color(0xFF93E8BE), chargeGlow = Color(0xFF5FD79A),
+    effortColor = Color(0xFF87B0D4), effortDeep = Color(0xFF4C7192), effortBright = Color(0xFFB0D0EA), effortGlow = Color(0xFF87B0D4),
+    restColor = Color(0xFF97A3BE), restDeep = Color(0xFF5A6786), restBright = Color(0xFFB8C3D8), restGlow = Color(0xFF97A3BE),
+    stressColor = Color(0xFFCE9663), stressDeep = Color(0xFF87B0D4), stressBright = Color(0xFFCE7563), stressGlow = Color(0xFFCE9663),
+    scenicCenter = Color(0xFF1C1C1E), scenicEdge = Color(0xFF000000), scenicStar = Color(0xFF54545A),
+    cardFillTop = Color(0xFF232326), cardFillBottom = Color(0xFF1C1C1E),
+    // "gold" is a legacy token name kept for API stability — it is the same emphasised light grey.
+    gold = Color(0xFFE6E6EA), goldLight = Color(0xFFFFFFFF), goldDeep = Color(0xFF9A9AA2),
+    goldDeepText = Color(0xFF000000), signalYellow = Color(0xFFE0C455),
+    titaniumTop = Color(0xFFFFFFFF), titaniumMid = Color(0xFFC8C8CE), titaniumLow = Color(0xFF8E8E96), titaniumDeep = Color(0xFF5A5A62),
     tipCore = Color(0xFFFFFFFF),
 )
 
-val LightTokens = PaletteTokens(
-    surfaceBase = Color(0xFFEAE3D4), surfaceRaised = Color(0xFFFFFFFF), surfaceOverlay = Color(0xFFFFFFFF),
-    surfaceInset = Color(0xFFDFD8C8), hairline = Color(0xFFD8D0BD), hairlineStrong = Color(0xFFC7BCA4),
-    textPrimary = Color(0xFF1A2230), textSecondary = Color(0xFF4C5564), textTertiary = Color(0xFF7C8696),
-    glowAmbient = Color(0xFFF0E4C0),
-    // Light chrome accent shifts to the deep brand blue (gold reserved for the recovery world + FAB).
-    accent = Color(0xFF234F9E), accentHover = Color(0xFF1C3F80), accentMuted = Color(0xFFE4ECF6), focusRing = Color(0xFF2F6FCB),
-    recovery000 = Color(0xFF8F6212), recovery030 = Color(0xFFA87718), recovery055 = Color(0xFFC28E26),
-    recovery078 = Color(0xFFD2A23A), recovery100 = Color(0xFFE0B44C),
-    strain000 = Color(0xFF7E460E), strain033 = Color(0xFFA4621B), strain066 = Color(0xFFC2792E), strain100 = Color(0xFFD89240),
-    sleepAwake = Color(0xFF97A2B2), sleepLight = Color(0xFF3A80D6), sleepDeep = Color(0xFF234F9E), sleepREM = Color(0xFF5790DA),
-    zone1 = Color(0xFF3A80D6), zone2 = Color(0xFF2E92B4), zone3 = Color(0xFFC28E26), zone4 = Color(0xFFC2792E), zone5 = Color(0xFFC84E1E),
-    statusPositive = Color(0xFFB07D17), statusWarning = Color(0xFFC2792E), statusCritical = Color(0xFFC84E1E),
-    metricCyan = Color(0xFF2E92B4), metricPurple = Color(0xFF3A80D6), metricAmber = Color(0xFFC2792E), metricRose = Color(0xFFC84E1E),
-    chargeColor = Color(0xFFB88421), chargeDeep = Color(0xFF8F6212), chargeBright = Color(0xFFE0B44C), chargeGlow = Color(0xFFC8902F),
-    effortColor = Color(0xFFB26A1C), effortDeep = Color(0xFF7E460E), effortBright = Color(0xFFD89240), effortGlow = Color(0xFFB26A1C),
-    restColor = Color(0xFF3A80D6), restDeep = Color(0xFF234F9E), restBright = Color(0xFF5790DA), restGlow = Color(0xFF3A80D6),
-    stressColor = Color(0xFFB88421), stressDeep = Color(0xFF3A80D6), stressBright = Color(0xFFC84E1E), stressGlow = Color(0xFFB88421),
-    scenicCenter = Color(0xFFFBF6EA), scenicEdge = Color(0xFFEDE6D6), scenicStar = Color(0xFFD8CDB6),
-    cardFillTop = Color(0xFFFFFFFF), cardFillBottom = Color(0xFFFAF7F0),
-    gold = Color(0xFFDBA52A), goldLight = Color(0xFFECC766), goldDeep = Color(0xFF9A6B12),
-    goldDeepText = Color(0xFF3A2708), signalYellow = Color(0xFFE8A800),
-    titaniumTop = Color(0xFFDDE1E6), titaniumMid = Color(0xFFBBC2C9), titaniumLow = Color(0xFF98A0A8), titaniumDeep = Color(0xFF6B737B),
-    tipCore = Color(0xFF241B06),
-)
 
-// MARK: - Chart style (data-viz colour mode) + the Classic throwback ramps
-
-enum class ChartStyle(val storageValue: String, val label: String) {
-    TITANIUM("titanium", "Titanium"),
-    CLASSIC("classic", "Classic");
-
-    companion object {
-        fun fromStorage(raw: String?): ChartStyle = entries.firstOrNull { it.storageValue == raw } ?: TITANIUM
-    }
-}
-
-/** Chart-colour preference, persisted in `noop_prefs` and mirrored in snapshot state so a flip
- *  re-colours every gauge/chart live (the Palette ramp accessors read [ChartStylePrefs.style]). */
-object ChartStylePrefs {
-    private const val FILE = "noop_prefs"
-    private const val KEY = "chart.style"
-    private fun prefs(ctx: Context): SharedPreferences =
-        ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-
-    var style by mutableStateOf(ChartStyle.TITANIUM)
-        private set
-
-    fun load(ctx: Context) {
-        style = ChartStyle.fromStorage(prefs(ctx).getString(KEY, ChartStyle.TITANIUM.storageValue))
-    }
-
-    fun set(ctx: Context, value: ChartStyle) {
-        style = value
-        prefs(ctx).edit().putString(KEY, value.storageValue).apply()
-    }
-}
-
-/** The Classic (throwback) data ramps — light/dark tuned. Picked by the Palette accessors when
- *  ChartStylePrefs.style == CLASSIC. Surfaces/text/accent are never classic — only data encodings. */
-data class ClassicRamp(
-    val recovery: List<Pair<Float, Color>>,
-    val strain: List<Pair<Float, Color>>,
-    val stress: List<Pair<Float, Color>>,
-    val sleepAwake: Color, val sleepLight: Color, val sleepDeep: Color, val sleepREM: Color,
-    val zone1: Color, val zone2: Color, val zone3: Color, val zone4: Color, val zone5: Color,
-    val statusPositive: Color, val statusWarning: Color, val statusCritical: Color,
-    val metricCyan: Color, val metricPurple: Color, val metricAmber: Color, val metricRose: Color,
-    val chargeColor: Color, val chargeDeep: Color, val chargeBright: Color,
-    val effortColor: Color, val effortDeep: Color, val effortBright: Color,
-    val restColor: Color, val restDeep: Color, val restBright: Color,
-    val stressColor: Color, val stressDeep: Color, val stressBright: Color,
-)
-
-val ClassicDark = ClassicRamp(
-    recovery = listOf(0.0f to Color(0xFFE5483B), 0.30f to Color(0xFFEE8B3C), 0.55f to Color(0xFFF2C53D), 0.78f to Color(0xFFA6D04E), 1.0f to Color(0xFF46B45A)),
-    strain = listOf(0.0f to Color(0xFF7FB2E8), 0.33f to Color(0xFF4A90E2), 0.66f to Color(0xFF2F6FCB), 1.0f to Color(0xFF1E4FA0)),
-    stress = listOf(0.0f to Color(0xFF46B45A), 0.5f to Color(0xFFF2C53D), 1.0f to Color(0xFFE5483B)),
-    sleepAwake = Color(0xFFC9CCD6), sleepLight = Color(0xFF6FA8E8), sleepDeep = Color(0xFF2A4C8F), sleepREM = Color(0xFF8E6FD6),
-    zone1 = Color(0xFF9AA7B5), zone2 = Color(0xFF46B45A), zone3 = Color(0xFFF2C53D), zone4 = Color(0xFFEE8B3C), zone5 = Color(0xFFE5483B),
-    statusPositive = Color(0xFF46B45A), statusWarning = Color(0xFFF2C53D), statusCritical = Color(0xFFE5483B),
-    metricCyan = Color(0xFF3FA9C9), metricPurple = Color(0xFF8E6FD6), metricAmber = Color(0xFFF2C53D), metricRose = Color(0xFFE5483B),
-    chargeColor = Color(0xFF46B45A), chargeDeep = Color(0xFF2E9E4F), chargeBright = Color(0xFF86D98E),
-    effortColor = Color(0xFF4A90E2), effortDeep = Color(0xFF2F6FCB), effortBright = Color(0xFF7FB2E8),
-    restColor = Color(0xFF6FA8E8), restDeep = Color(0xFF2A4C8F), restBright = Color(0xFF8E6FD6),
-    stressColor = Color(0xFFF2C53D), stressDeep = Color(0xFF46B45A), stressBright = Color(0xFFE5483B),
-)
-
-val ClassicLight = ClassicRamp(
-    recovery = listOf(0.0f to Color(0xFFCB3A2F), 0.30f to Color(0xFFD87328), 0.55f to Color(0xFFCFA528), 0.78f to Color(0xFF74A53A), 1.0f to Color(0xFF2E9E4F)),
-    strain = listOf(0.0f to Color(0xFF5E92D6), 0.33f to Color(0xFF3A74C4), 0.66f to Color(0xFF284F9C), 1.0f to Color(0xFF1C3E80)),
-    stress = listOf(0.0f to Color(0xFF2E9E4F), 0.5f to Color(0xFFCFA528), 1.0f to Color(0xFFCB3A2F)),
-    sleepAwake = Color(0xFF8C95A3), sleepLight = Color(0xFF3A80D6), sleepDeep = Color(0xFF203E73), sleepREM = Color(0xFF6A4FC0),
-    zone1 = Color(0xFF828D9B), zone2 = Color(0xFF2E9E4F), zone3 = Color(0xFFCFA528), zone4 = Color(0xFFD87328), zone5 = Color(0xFFCB3A2F),
-    statusPositive = Color(0xFF2E9E4F), statusWarning = Color(0xFFCFA528), statusCritical = Color(0xFFCB3A2F),
-    metricCyan = Color(0xFF2E92B4), metricPurple = Color(0xFF6A4FC0), metricAmber = Color(0xFFCFA528), metricRose = Color(0xFFCB3A2F),
-    chargeColor = Color(0xFF2E9E4F), chargeDeep = Color(0xFF207A3C), chargeBright = Color(0xFF5FBE6E),
-    effortColor = Color(0xFF3A74C4), effortDeep = Color(0xFF284F9C), effortBright = Color(0xFF5E92D6),
-    restColor = Color(0xFF3A80D6), restDeep = Color(0xFF203E73), restBright = Color(0xFF6A4FC0),
-    stressColor = Color(0xFFCFA528), stressDeep = Color(0xFF2E9E4F), stressBright = Color(0xFFCB3A2F),
-)
-
-// MARK: - Appearance preference (System / Light / Dark)
-
-enum class AppearanceMode(val storageValue: String, val label: String) {
-    SYSTEM("system", "System"),
-    LIGHT("light", "Light"),
-    DARK("dark", "Dark");
-
-    companion object {
-        fun fromStorage(raw: String?): AppearanceMode =
-            entries.firstOrNull { it.storageValue == raw } ?: SYSTEM
-    }
-}
-
-/** Theme preference, persisted in `noop_prefs` and mirrored in snapshot state so the toggle is live.
- *  [load] is called once from MainActivity before first composition (no flash); [set] writes + flips. */
-object AppearancePrefs {
-    private const val FILE = "noop_prefs"
-    private const val KEY = "theme.appearance"
-
-    private fun prefs(ctx: Context): SharedPreferences =
-        ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-
-    /** Live appearance mode read by NoopTheme; defaults to System until [load] runs. */
-    var mode by mutableStateOf(AppearanceMode.SYSTEM)
-        private set
-
-    fun load(ctx: Context) {
-        mode = AppearanceMode.fromStorage(prefs(ctx).getString(KEY, AppearanceMode.SYSTEM.storageValue))
-    }
-
-    fun set(ctx: Context, value: AppearanceMode) {
-        mode = value
-        prefs(ctx).edit().putString(KEY, value.storageValue).apply()
-    }
-}
+// The chart-style picker and the light/dark appearance picker both went with the Settings sections
+// that were their only controls: this app has ONE fixed dark scheme and one data-colour ramp, so the
+// modes, their persisted prefs and the Classic ramps are gone rather than left as unreachable state.

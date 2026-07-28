@@ -32,16 +32,11 @@ import com.noop.ble.LiveState
 import com.noop.ble.PuffinExperiment
 import com.noop.ble.WhoopConnectionService
 import com.noop.ble.WhoopModel
-import androidx.health.connect.client.HealthConnectClient
 import com.noop.data.DailyMetric
 import com.noop.data.HrSample
 import com.noop.data.WhoopRepository
 import com.noop.data.WorkoutRow
-import com.noop.ingest.ActivityFileImporter
-import com.noop.ingest.HealthConnectImporter
 import com.noop.ble.WhoopBleClient
-import com.noop.ingest.HealthConnectWriter
-import com.noop.ingest.LiftingImporter
 import com.noop.notif.IllnessAlertNotifier
 import com.noop.notif.ScheduledReportNotifier
 import com.noop.notif.StrainTargetNotifier
@@ -210,71 +205,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             log = { ble.externalLog(it) },
         )
 
-    /**
-     * A DISCOVERY-ONLY EXPERIMENTAL [com.noop.ble.HuamiHrSource] for the Add-Amazfit/Mi-Band wizard. Runs
-     * its OWN scan and never connects/persists here — the [SourceCoordinator] owns connection once a Huami
-     * device becomes active. The sinks are no-ops; the wizard only reads its `discovered` / `scanning`
-     * StateFlows. Mirrors the macOS AddDeviceWizard's throwaway HuamiHRSource(feedsLive: false).
-     */
-    fun makeHuamiScanner(): com.noop.ble.HuamiHrSource =
-        com.noop.ble.HuamiHrSource(
-            context = appContext,
-            deviceId = "scan-preview",
-            liveSink = { },
-            // Wizard scan diagnostics → the SAME exported strap log the active path uses (issue #421).
-            // The source self-prefixes "Huami: "; [externalLog] redacts addresses. Statuses / counts only.
-            log = { ble.externalLog(it) },
-        )
-
-    /**
-     * A DISCOVERY-ONLY EXPERIMENTAL [com.noop.ble.OuraLiveSource] for the Add-Oura wizard. Runs its OWN
-     * scan (it owns its OWN scanner + GATT, never the WHOOP client) and never persists or feeds live state
-     * here - the [SourceCoordinator] owns connection once the ring becomes active. The live sink / persist
-     * are no-ops and the auth key is null (discovery has no need to authenticate), so the scanner only ever
-     * surfaces nearby rings via its `discovered` / `scanning` StateFlows. Mirrors the macOS
-     * AddDeviceWizard's discovery-only OuraLiveSource (deviceId "scan-preview", no-op persist).
-     *
-     * A concrete [com.noop.oura.OuraRingGen] is required by the constructor; gen3 (the verified-corpus
-     * default) is fine for discovery since the wizard's pick step confirms the real generation from the
-     * model the user selects. The MTU clamp / command set never run during a scan-only session.
-     */
-    fun makeOuraScanner(): com.noop.ble.OuraLiveSource =
-        com.noop.ble.OuraLiveSource(
-            context = appContext,
-            deviceId = "scan-preview",
-            ringGen = com.noop.oura.OuraRingGen.GEN3,
-            liveSink = { _, _ -> },
-            authKey = { null },
-            persist = { _, _ -> },
-            // Route the scanner's diagnostics into the SAME exported strap log the active path uses
-            // (issue #421 parity), so a tester's Oura wizard scan is captured. The source self-prefixes
-            // "Oura: "; [externalLog] redacts addresses. Statuses / service UUIDs / counts only, never a
-            // device address.
-            log = { ble.externalLog(it) },
-        )
-
     // MARK: - Add-a-device wizard (multi-WHOOP, MW-4) — thin pass-throughs to the BLE client.
 
     /** WHOOP straps surfaced by the wizard's present-scan ([presentWhoopScan]), WITHOUT auto-connecting.
      *  The wizard observes this directly so its pick list updates as straps appear. */
     val discoveredWhoops: StateFlow<List<com.noop.ble.WhoopBleClient.DiscoveredWhoop>> = ble.discoveredWhoops
-
-    /** The active Oura ring's live adopt outcome, mirrored from the [com.noop.ble.SourceCoordinator]. The
-     *  Add-Oura wizard observes this to leave its Adopting step: streaming -> success/close, failed -> the
-     *  honest Failed step. Idle whenever no Oura source is live. Mirrors Swift `AppModel.ouraAdoptPhase`. */
-    val ouraAdoptPhase: StateFlow<com.noop.ble.OuraLiveSource.AdoptPhase> =
-        noopApp.sourceCoordinator.ouraAdoptPhase
-
-    /** The active Oura ring's honest needs-pairing message (null when none), mirrored from the
-     *  [com.noop.ble.SourceCoordinator]. The wizard treats a non-null value during Adopting as an honest
-     *  failure too. Mirrors Swift `AppModel.ouraNeedsPairing`. */
-    val ouraNeedsPairing: StateFlow<String?> = noopApp.sourceCoordinator.ouraNeedsPairing
-
-    /** The active Oura ring's live wear/charge state (worn / charging / off), or null when no Oura source
-     *  is live. The Live screen prefers this for its On-wrist / Off-wrist read (#628). Mirrors iOS
-     *  `LiveState.ouraWearState`. */
-    val ouraWearState: StateFlow<com.noop.oura.OuraWearState?> =
-        noopApp.sourceCoordinator.ouraWearState
 
     /** #656: a journal day-offset (daysBack; -1 = Tomorrow) the Today journal widget asks the journal
      *  (Insights) to open at, so tapping a SPECIFIC day's bar lands on THAT day instead of always today.
@@ -296,13 +231,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * family.
      */
     fun presentWhoopScan(model: WhoopModel) {
+        pairingInProgress = true
         _selectedModel.value = model
         ble.prepareForPresentScan(model)
         ble.scanForWhoops(model)
     }
 
+    /** Play the lucid-dream cue once, so the pattern can be checked while awake instead of only ever
+     *  being felt for the first time when it fires unannounced. No-op without a connected strap. */
+    fun testLucidCue() = ble.buzzLucidCue(bursts = 1)
+
     /** End the WHOOP present-scan (idempotent). Call on leaving the wizard's pick step / on dismiss. */
-    fun stopWhoopScan() = ble.stopWhoopScan()
+    fun stopWhoopScan() {
+        pairingInProgress = false
+        ble.stopWhoopScan()
+    }
+
+    /**
+     * True while the Add-a-device wizard is picking a strap.
+     *
+     * Auto-reconnect is suppressed for the duration: it would otherwise race the wizard and adopt the
+     * strap under the PREVIOUSLY saved family, which is how a 5/MG ended up registered with a stale
+     * model label and the Devices screen read "Exact model unknown".
+     */
+    @Volatile
+    var pairingInProgress: Boolean = false
+        private set
 
     /**
      * Register a paired device and (optionally) make it the active one — the Add-a-device wizard's single
@@ -312,30 +266,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      */
     suspend fun registerDevice(device: com.noop.data.PairedDeviceRow, makeActive: Boolean) {
         addPairedDevice(device)
+        // The wizard's family pick is AUTHORITATIVE. An auto-connect that got in first may already have
+        // adopted this strap under a stale/generic model, and the upsert above does not necessarily
+        // overwrite it — so state the model explicitly. This is what stops the Devices screen falling
+        // back to "Exact model unknown" after a re-pair.
+        runCatching { deviceRegistry.setModel(device.id, device.model) }
+        // Keep the remembered family in step too, so the NEXT launch auto-reconnects as the right
+        // family instead of re-introducing the mismatch.
+        device.peripheralId?.let { addr ->
+            runCatching { NoopPrefs.setLastDevice(appContext, addr, _selectedModel.value) }
+        }
         if (makeActive) setActiveDevice(device.id)
     }
-
-    /**
-     * Store the 16-byte Oura application install key for a ring (keyed by its registry device id) in the
-     * encrypted, Keystore-backed [com.noop.ble.OuraInstallKeyStore]. The Add-Oura wizard's Advanced path
-     * calls this with the user-supplied key so the live [com.noop.ble.OuraLiveSource]'s authKey closure can
-     * read it on the next connect. The key is unsigned bytes 0..255; a wrong-length key is rejected by the
-     * store. Mirrors the macOS OuraKeyStore.save. The key is never logged.
-     */
-    fun saveOuraInstallKey(deviceId: String, key: IntArray): Boolean =
-        com.noop.ble.OuraInstallKeyStore.save(appContext, deviceId, key)
-
-    /**
-     * Arm (or clear) the one-shot adopt-intent for an Oura ring (keyed by its registry device id). The
-     * Add-Oura wizard's DESTRUCTIVE factory-reset-and-adopt path calls this with true AFTER its
-     * irreversible-consent gate and second destructive confirm, BEFORE registering the ring active, so the
-     * [com.noop.ble.SourceCoordinator] consumes it when it builds the live source and permits the dangerous
-     * post-factory-reset key install for that one session (OURA_PROTOCOL.md s3.2). The Advanced-key path
-     * NEVER calls this (it authenticates with the user's own key and must not reset the ring). One-shot:
-     * the source consumes it on the next connect.
-     */
-    fun armOuraAdopt(deviceId: String) =
-        com.noop.ble.OuraInstallKeyStore.setPendingAdopt(appContext, deviceId, true)
 
     // Body profile (age/sex/weight/height + HR-max override) — the same SharedPreferences
     // store the Settings screen edits. Feeds the on-device scorer's HRmax/zones/calories.
@@ -482,6 +424,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _phoneAlarmWindowMinutes = MutableStateFlow(phoneAlarmStore.windowMinutes)
     /** How long after the target the guaranteed hard deadline sits. */
     val phoneAlarmWindowMinutes: StateFlow<Int> = _phoneAlarmWindowMinutes.asStateFlow()
+    private val _phoneAlarmRebuzzEnabled = MutableStateFlow(phoneAlarmStore.rebuzzEnabled)
+    /** Re-buzz on fall-back-asleep: after a wake alarm fires (either path), watch the live HR and
+     *  wake the strap again if the user drifts back to sleep (RebuzzWatcher in the FGS). Applies to
+     *  BOTH the phone wake-window alarm and the strap's scheduled firmware alarm. Opt-in, default OFF. */
+    val phoneAlarmRebuzzEnabled: StateFlow<Boolean> = _phoneAlarmRebuzzEnabled.asStateFlow()
     // "Buzz WHOOP 4" companion (#536): arm the strap's firmware alarm at the phone alarm's EARLIEST wake
     // time, so the strap buzzes first and the OS alarm fires at the hard deadline as backup. Declared here
     // with the phone-alarm flows (BEFORE init) so the init bond collector can read it. Default OFF.
@@ -523,17 +470,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * skipped. Updated in lockstep with [todayFooterLoadedSig]. `null` = nothing cached yet this process.
      */
     var todayFooterCache: TodayFooterState? = null
-
-    /**
-     * #849: the same re-mount guard for Today's pinned "Your cards" reads (Stress / Fitness age / Vitality),
-     * which scan the whole metric history. Signature + last-computed values are cached on the ViewModel so a
-     * re-mount restores them and skips the redundant reload, exactly like the footer above. `null` = not yet
-     * loaded this process; the cached triple is restored into the screen's local state on first composition.
-     */
-    var todayCardsLoadedSig: Int? = null
-    var todayStressCache: Double? = null
-    var todayFitnessAgeCache: Double? = null
-    var todayVitalityCache: Double? = null
 
     /**
      * Recent daily metrics (newest last), backing the Today grid + illness watch.
@@ -601,7 +537,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshActiveDeviceName()
         // #577 — surface the strap's smart-alarm wake as a local notification too (iOS AppModel.postSmartAlarm
         // twin), so a pocketed phone doesn't miss the wrist buzz. Self-gates on the wrist-alerts master.
-        ble.onSmartAlarmFired = { com.noop.notif.SmartAlarmNotifier.onFired(appContext) }
+        // Also stamp the fire time so the FGS re-buzz watcher (wake again on fall-back-asleep) can arm
+        // off the STRAP wake path just like the phone-alarm path (SmartAlarmReceiver stamps its own).
+        ble.onSmartAlarmFired = {
+            com.noop.notif.SmartAlarmNotifier.onFired(appContext)
+            phoneAlarmStore.lastFiredAtMs = System.currentTimeMillis()
+            // Re-arm the strap's NORMAL schedule after ANY firmware-alarm execution — the alarm is a
+            // one-shot, so without this the next scheduled wake waited on the daily ticker / a bond
+            // edge. This is also what restores the schedule after the re-buzz watcher's one-shot
+            // (WhoopConnectionService arms it a minute out when you fall back asleep). DELAYED a few
+            // minutes so the re-arm write can't race the alarm's own in-progress buzzing — and if the
+            // user is still at the sleep floor then, the re-buzz cycle has room to arm its NEXT
+            // one-shot after this restore (reconcile arms tomorrow; a later re-buzz overwrites it,
+            // fires, and lands back here).
+            viewModelScope.launch {
+                delay(STRAP_ALARM_POST_FIRE_REARM_DELAY_MS)
+                reconcileStrapAlarm()
+            }
+        }
         // Smooth HR from each LiveState emission, and re-arm the strap's firmware alarm whenever it
         // (re)bonds. A smart-alarm time changed while the strap was away never reached it — the send
         // is gated on bond — so the strap kept the OLD time and fired at it (#59). Gated on enabled so
@@ -703,12 +656,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // gate against the LOW end of today's recovery-derived optimal band (#43). The notifier's
                     // persisted day gate makes this safe to fire on every republish; null recovery (calibrating)
                     // yields a null band → no target → no notification.
-                    StrainTargetNotifier.onStrainTarget(
-                        context = appContext,
-                        day = todayRow.day,
-                        dayStrain21 = todayRow.strain?.let { UnitFormatter.effortValue(it, EffortScale.WHOOP) },
-                        target21 = optimalStrainRange(todayRow.recovery)?.low,
-                    )
                 }
                 // v5 skin-temp suite: run the Cycle / Body-clock / Illness-heads-up engines over the same
                 // cached history and publish their RESULTS for the Health hub. The richer IllnessSignalEngine
@@ -857,6 +804,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         useExperimentalSleepV2 = PuffinExperiment.from(appContext).experimentalSleepV2,
                         // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
                         useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
+                        // Manual-sleep-only mode: automatic detection off; nights come from the user's marks.
+                        manualSleepOnly = NoopPrefs.manualSleepOnly(appContext),
                         // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route the
                         // per-day sleep gate trace into the SAME shareable strap log, tagged .sleep so it
                         // lands under the profile in the export. Zero-cost when off: the gate is one
@@ -923,14 +872,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // own cancellation — rethrow it so onCleared() actually stops the loop. (#125)
                 }.onSuccess { NoopPrefs.setAnalyzeWatermark(appContext, analyzeFp) }
                     .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
-                // Opt-in writeback: push the freshly computed nights into Health Connect so other
-                // apps see them. Idempotent (clientRecordId per metric+day), so re-running every
-                // cycle just upserts. Never let an HC hiccup (perm revoked mid-flight, provider
-                // update) break the analysis loop.
-                if (_hcWriteback.value) {
-                    runCatching { HealthConnectWriter.write(appContext, repository, deviceId) }
-                    refreshHcWritebackStatus()   // #660: reflect the outcome the writer just persisted
-                }
                 // 15-min backstop cadence, but wake EARLY on an app-resume kick (#386 self-heal) so a
                 // night the overnight tick was killed before scoring catches up the moment the user opens
                 // NOOP. The next iteration's fingerprint gate makes an unnecessary wake a cheap no-op.
@@ -1028,6 +969,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * BLE client itself no-ops if already connected or the runtime permission isn't granted yet.
      */
     private fun autoReconnectOnLaunch() {
+        // Never race the pairing wizard: reconnecting mid-pairing adopts the strap under the model the
+        // user is in the middle of changing.
+        if (pairingInProgress) return
         val saved = NoopPrefs.lastDevice(appContext) ?: return
         // Restore the model selection whenever a strap is remembered — deliberately NOT gated on the
         // background-connection pref, so an opted-out 5/MG user's picker and scan family still
@@ -1108,6 +1052,23 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!_presentActiveWorkout.value) return false
         _presentActiveWorkout.value = false
         return _activeWorkout.value != null
+    }
+
+    /** One-shot: the quick-actions (+) sheet raises this so the DAY screen opens the live-session
+     *  overlay. "Start session" used to be its own card on Day; it now lives in the + menu, but the
+     *  overlay itself is still presented by Day — so the sheet raises this and Day consumes it on its
+     *  next composition. Same shape as [presentActiveWorkout] above. Inert until raised. */
+    private val _presentLiveSession = MutableStateFlow(false)
+    val presentLiveSession: StateFlow<Boolean> = _presentLiveSession.asStateFlow()
+
+    /** Raise the one-shot (the + sheet's "Start session"). */
+    fun openLiveSession() { _presentLiveSession.value = true }
+
+    /** Consume it (Day calls this). Returns true exactly once per raise. */
+    fun consumeLiveSessionRequest(): Boolean {
+        if (!_presentLiveSession.value) return false
+        _presentLiveSession.value = false
+        return true
     }
 
     /** Durable store for an in-flight NON-GPS workout (#529). The GPS path is already process-durable via
@@ -1298,12 +1259,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // of only after the next strap offload sync. IGNORE-on-conflict makes a later sync of the
             // same seconds a no-op.
             runCatching { if (samples.isNotEmpty()) repository.insertHr(samples) }
-            if (_hcWriteback.value) {
-                runCatching { HealthConnectWriter.writeExercise(appContext, row, w.sport.exerciseType) }
-                // #528: export the just-captured HR series now (workout row already upserted above, so
-                // the export's window logic keeps these samples at full 1 Hz rather than ~1/30 s).
-                writebackHealthConnectNow()
-            }
         }
     }
 
@@ -1464,6 +1419,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 useExperimentalSleepV2 = PuffinExperiment.from(appContext).experimentalSleepV2,
                 // Opt-in motion-aware wake refinement (#364 follow-up) — same flag the 15-min loop reads.
                 useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
+                // Manual-sleep-only mode — same flag the 15-min loop reads, so an edit-triggered rescore
+                // can't resurrect auto-detected nights the mode suppresses.
+                manualSleepOnly = NoopPrefs.manualSleepOnly(appContext),
             )
         }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
     }
@@ -1478,30 +1436,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val apple = repository.workouts("apple-health", 0L, now) +
                 repository.workouts("health-connect", 0L, now)
             val detected = repository.detectedWorkoutsUnion(deviceId, 0L, now)
-            // Imported lifting sessions (Hevy / Liftosaur) carry a volume-load note but no HR — they're
-            // a strength-volume estimate, not cardio. Kept OUT of the strap HR-fill below so we never
-            // fabricate a heart rate the lift never measured.
-            val lifting = repository.workouts(LiftingImporter.SOURCE_ID, 0L, now)
-            // #29: imported activity FILES (FIT / GPX / TCX) live under their own "activity-file" source, so
-            // without reading it a successful file import never appears in the Workouts list (Data Sources
-            // counts it, the load didn't). They're cardio (often GPS + HR), so they go through the strap
-            // HR-fill below like the imported Apple sessions — a GPX with no HR borrows the strap's, while a
-            // FIT that already carries HR is untouched (fill only fills nulls).
-            val activityFiles = repository.workouts(ActivityFileImporter.SOURCE_ID, 0L, now)
             val markers = repository.dismissedDetected(deviceId)
             // Fill imported sessions' missing HR from strap samples (#77), same as before; detected /
             // manual rows already carry their own HR so they pass through unchanged. #961: also backfill a
             // strap-native row's Effort (strain) from the strap trace when it's null, so a live/manual
             // session that ended with sparse HR can't show a blank Effort while the day total counted it.
             val filled = repository.fillWorkoutHrFromStrap(
-                (whoop + apple + detected + activityFiles),
+                (whoop + apple + detected),
                 strainMaxHR = profileStore.hrMax.toDouble(),
                 strainSex = profileStore.sex,
             )
             // #687: collapse the SAME activity tracked live under the strap AND imported from Health
             // Connect / Apple Health into one richer entry — they sit under different sources so without
             // this they show as two sessions. Dedup runs on the dismissed-filtered set, before the sort.
-            val filteredRows = WorkoutEditing.filterDismissed(filled + lifting, markers)
+            val filteredRows = WorkoutEditing.filterDismissed(filled, markers)
             // Workouts & GPS test mode: when on, run the dedup twin which returns the BYTE-IDENTICAL kept list
             // plus a trace line per collapsed cross-source pair, tagged .workouts. Zero-cost when off (the gate
             // is one SharedPreferences bool read), and the kept list equals dedupCrossSource exactly, so the
@@ -1883,12 +1831,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshHcWritebackStatus() { _hcWritebackStatus.value = readHcWritebackStatus() }
 
     init {
-        // On app open, catch up the Health Connect sync if it's overdue. This on-open import is the
-        // ONLY auto-sync path: we deliberately skip a true-background worker — it needs a sensitive
-        // background-health permission and is unreliable on Android 14+, and opening the app regularly
-        // is enough for a personal health app.
-        syncHealthConnectIfStale()
-
         // If a GPS workout is still tracking in the background (the screen was off and this VM was
         // recreated on reopen), rebuild its active-workout card from the process-level session. Placed
         // in THIS init — not the first one above — because it reads _activeWorkout, which is declared
@@ -1898,71 +1840,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         // snapshot so an OS kill mid-session can still be ended + saved (#529). Order matters: a live GPS
         // session wins; the non-GPS path only fills in when [_activeWorkout] is still null.
         rehydrateActiveNonGpsWorkout()
-    }
-
-    /** Flip auto-sync. Persists and, on enable, kicks an immediate import; thereafter it catches up on
-     *  app open via [syncHealthConnectIfStale]. */
-    fun setHcAutoSync(enabled: Boolean) {
-        _hcAutoSync.value = enabled
-        NoopPrefs.setHcAutoSync(appContext, enabled)
-        if (enabled) syncHealthConnectIfStale(force = true)
-    }
-
-    /** Change the sync interval (hours). Takes effect on the next on-open catch-up sync. */
-    fun setHcSyncHours(hours: Int) {
-        _hcSyncHours.value = hours
-        NoopPrefs.setHcSyncHours(appContext, hours)
-    }
-
-    /** Flip Health Connect writeback (computed metrics → HC). Persists; the UI requests the write
-     *  permissions and kicks the first write via [writebackHealthConnectNow]. While on, every 15-min
-     *  recompute re-writes (idempotent — clientRecordId upserts). Default OFF. */
-    fun setHcWriteback(enabled: Boolean) {
-        _hcWriteback.value = enabled
-        NoopPrefs.setHcWriteback(appContext, enabled)
-    }
-
-    /** One immediate writeback (permissions assumed granted — the UI gates on that). */
-    fun writebackHealthConnectNow() {
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching { HealthConnectWriter.write(appContext, repository, deviceId) }
-            }
-            refreshHcWritebackStatus()   // #660: surface the just-recorded outcome in Data Sources
-        }
-    }
-
-    /**
-     * Foreground catch-up import: when auto-sync is on and the last sync is older than the chosen
-     * interval (or [force]), pull from Health Connect now. Health Connect background reads are
-     * restricted, so opening the app is the guaranteed sync point. No-ops silently if Health Connect
-     * is unavailable or its read permissions aren't granted (the UI requests them when enabling).
-     */
-    fun syncHealthConnectIfStale(force: Boolean = false) {
-        if (!_hcAutoSync.value) return
-        val intervalMs = _hcSyncHours.value.toLong() * 60 * 60 * 1000
-        val last = _hcLastSync.value
-        val now = System.currentTimeMillis()
-        if (!force && last != 0L && now - last < intervalMs) return
-        viewModelScope.launch {
-            val ran = withContext(Dispatchers.IO) {
-                if (HealthConnectImporter.sdkStatus(appContext) != HealthConnectClient.SDK_AVAILABLE) {
-                    return@withContext false
-                }
-                val granted = runCatching {
-                    HealthConnectImporter.client(appContext).permissionController.getGrantedPermissions()
-                }.getOrDefault(emptySet())
-                // Partial permissions are fine (#150): auto-import as long as at least one type is granted.
-                if (granted.none { it in HealthConnectImporter.PERMISSIONS }) return@withContext false
-                // Pass the profile height so the importer can derive BMI (Health Connect has no BMI record).
-                runCatching { HealthConnectImporter.import(appContext, repository, profileStore.heightCm) }.isSuccess
-            }
-            if (ran) {
-                val t = System.currentTimeMillis()
-                NoopPrefs.setHcLastSync(appContext, t)
-                _hcLastSync.value = t
-            }
-        }
     }
 
     /** How many screens currently want the live HR stream (Live, Health Monitor, …). The stream stays
@@ -2099,6 +1976,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (phoneAlarmStore.enabled) SmartAlarmScheduler.arm(appContext, phoneAlarmStore)
     }
 
+    /** Enable/disable the fall-back-asleep re-buzz. Pure preference — the FGS collector reads the
+     *  store each tick, so no re-arm/reschedule is needed here. */
+    fun setPhoneAlarmRebuzzEnabled(enabled: Boolean) {
+        phoneAlarmStore.rebuzzEnabled = enabled
+        _phoneAlarmRebuzzEnabled.value = enabled
+    }
+
     /** Whether the OS will honour an exact alarm right now (API 31+ gates it behind a permission). */
     fun canScheduleExactAlarms(): Boolean = SmartAlarmScheduler.canScheduleExact(appContext)
 
@@ -2150,15 +2034,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             alreadyUnwell = false,
         )
     }
-
-    /** Build today's fused multi-device record for [FusedRecordScreen] (v5 Local Multi-Device Fusion).
-     *  Reads each source's banked row for the logical day and runs the pure FusionResolver per metric;
-     *  no core-waterfall change. Suspend so the screen calls it from a LaunchedEffect. */
-    suspend fun fusedRecordForToday(): FusedRecord =
-        // SPINE / #814: the strap + computed reads follow the registry's ACTIVE strap id (the same id the
-        // live read path resolves to), not a hardcoded "my-whoop", so a non-WHOOP active band fuses its OWN
-        // data. A single-WHOOP install resolves to "my-whoop", so this is byte-identical there.
-        FusionDayAdapter.buildFor(repository, logicalDayKeyNow(), activeStrapId = deviceId)
 
     /** Toggle strap low/full battery notifications (#368). The notifier reads NoopPrefs on each
      *  live-state update, so persisting is all that's needed — no stream to re-arm. */
@@ -2278,17 +2153,92 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Record a "sleep mark" via the existing [SleepMark] analytics + the shareable strap log, with a
-     *  confirming buzz — the same logging-only path the Sleep screen's mark card uses (#461). A double-tap
+     *  confirming buzz — routed through the SAME boundary logic the Sleep screen's mark card uses, so in
+     *  manual-sleep-only mode a double-tap bedtime also opens the pending night (#461). A double-tap
      *  can't pick bedtime vs wake, so it defaults to bedtime ([SleepMark.nowDefault]). */
     private fun markSleep() {
-        val mark = SleepMark.nowDefault()
-        ble.externalLog(mark.logLine())
         ble.buzz(1)
+        recordSleepBoundary(SleepMarkType.BEDTIME)
+    }
+
+    // --- Manual-sleep-only mode: automatic detection off; the mark buttons DEFINE the night. ---
+
+    private val _manualSleepOnly = MutableStateFlow(NoopPrefs.manualSleepOnly(appContext))
+    /** Whether automatic sleep detection is disabled in favour of the bedtime/wake marks. */
+    val manualSleepOnly: StateFlow<Boolean> = _manualSleepOnly.asStateFlow()
+
+    private val _pendingBedtimeMs = MutableStateFlow(NoopPrefs.pendingBedtimeMs(appContext))
+    /** The pending "Going to sleep" instant (epoch ms; 0 = none) awaiting its "I'm awake" twin —
+     *  drives the Sleep screen's "bedtime marked at…" caption in manual mode. */
+    val pendingBedtimeMs: StateFlow<Long> = _pendingBedtimeMs.asStateFlow()
+
+    /** Flip manual-sleep-only. Persists, then re-scores the window immediately so the change is visible
+     *  now: enabling stops fresh auto-detected nights this pass; disabling lets the next pass re-detect.
+     *  Already-persisted sessions are untouched either way (user-logged rows are never auto-removed). */
+    fun setManualSleepOnly(enabled: Boolean) {
+        NoopPrefs.setManualSleepOnly(appContext, enabled)
+        _manualSleepOnly.value = enabled
+        viewModelScope.launch { rescoreAfterEdit() }
+    }
+
+    /** A stale pending bedtime: past this span with no wake tap, closing the "night" would fabricate an
+     *  implausible 18h+ sleep — mirror the detector's own 16 h span-cap philosophy and refuse instead. */
+    private val pendingBedtimeMaxSpanMs = 18L * 60 * 60 * 1000
+
+    /** Floor under a manual night: a wake tap this soon after bedtime is a mis-tap (pocket tap, double
+     *  press), not a night; the pending bedtime is KEPT so the real wake tap still closes it. */
+    private val pendingBedtimeMinSpanMs = 5L * 60 * 1000
+
+    /**
+     * One user-tapped sleep boundary — the SINGLE path both the Sleep screen's mark card and the
+     * double-tap automation use. Always does the Phase-1 logging (strap-log line + `sleep_mark` series
+     * row). In manual-sleep-only mode it ALSO drives the night: BEDTIME opens a pending night (persisted,
+     * so it survives the app dying overnight); WAKE closes it into a real user-owned sleep session over
+     * [bedtime, wake] via the existing #508 manual-session path (staged from raw, userEdited=true, day
+     * re-scored immediately). Returns the toast text describing what actually happened — honest about
+     * every refusal, so a tap never silently does nothing.
+     */
+    fun recordSleepBoundary(type: SleepMarkType): String {
+        val mark = SleepMark.now(type)
+        ble.externalLog(mark.logLine())
         viewModelScope.launch {
-            // Use the SAME "my-whoop" series source the Sleep screen's mark card writes (SleepScreen.kt)
-            // and reads back from, so a double-tap mark lands in the same place a tapped one does.
+            // Same "my-whoop" series source the mark card has always written — the Phase-1 log survives
+            // in manual mode unchanged (it's the debugging record; the session is the product).
             runCatching { repository.upsertMetricSeries(listOf(mark.metricPoint("my-whoop"))) }
         }
+        if (!_manualSleepOnly.value) return mark.confirmation()
+
+        if (type == SleepMarkType.BEDTIME) {
+            NoopPrefs.setPendingBedtimeMs(appContext, mark.tsMs)
+            _pendingBedtimeMs.value = mark.tsMs
+            return "${mark.confirmation()} Tap \"I'm awake\" when you get up to log the night."
+        }
+
+        // WAKE: close the pending night, refusing dishonest windows rather than logging them.
+        val bedMs = _pendingBedtimeMs.value
+        val spanMs = mark.tsMs - bedMs
+        if (bedMs <= 0L) {
+            return "No bedtime was marked, so there's no night to log — tap \"Going to sleep\" at lights-out."
+        }
+        if (spanMs < pendingBedtimeMinSpanMs) {
+            val min = (spanMs / 60_000L).coerceAtLeast(0)
+            return "Only $min min since bedtime — not logged as a night. Your bedtime mark is still set."
+        }
+        if (spanMs > pendingBedtimeMaxSpanMs) {
+            NoopPrefs.setPendingBedtimeMs(appContext, 0L)
+            _pendingBedtimeMs.value = 0L
+            return "Your bedtime mark is over 18 h old — too stale to log as one night. Mark bedtime fresh tonight."
+        }
+        NoopPrefs.setPendingBedtimeMs(appContext, 0L)
+        _pendingBedtimeMs.value = 0L
+        viewModelScope.launch {
+            // The #508 manual-session path: staged from whatever raw the strap has for the window (the
+            // post-sync self-heal upgrades the stages once denser raw lands), userEdited=true so the
+            // engine preserves it, and the day re-scores immediately (rescoreAfterEdit inside).
+            addManualNap(bedMs / 1000L, mark.tsMs / 1000L)
+        }
+        val clock = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+        return "Night logged: ${clock.format(java.util.Date(bedMs))} → ${clock.format(java.util.Date(mark.tsMs))}."
     }
 
     /** Whether the device's locale formats time on a 24-hour clock — drives the Haptic Clock's hour
@@ -2356,6 +2306,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         const val ANALYZE_INTERVAL_MS = 15 * 60 * 1_000L
         /** Daily re-arm cadence for the single-instant strap firmware alarm (secondary buzz cue). */
         const val STRAP_ALARM_REARM_INTERVAL_MS = 24 * 60 * 60 * 1_000L
+        /** Post-execution schedule restore: how long after a firmware alarm FIRES (event 57) the
+         *  normal next occurrence is re-armed. Long enough that the SET_ALARM_TIME write can't race
+         *  (or cut short) the alarm's own in-progress buzzing; short enough that the schedule is back
+         *  well before anything else could want the slot. */
+        const val STRAP_ALARM_POST_FIRE_REARM_DELAY_MS = 3 * 60 * 1_000L
         /** SharedPreferences key for the persisted double-tap action (stored as the enum NAME). */
         const val DOUBLE_TAP_ACTION_KEY = "noop.doubleTapAction"
     }

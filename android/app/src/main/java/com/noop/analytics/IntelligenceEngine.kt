@@ -220,6 +220,11 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night mean (the
         // historical default) when false. The Context-aware caller reads UnitPrefs.hrvWindow and passes it.
         deepHrvWindow: Boolean = false,
+        // Manual-sleep-only mode: automatic sleep detection is disabled — analyzeDay skips detectSleep and
+        // the day's sleep comes exclusively from user-logged (userEdited) sessions via the existing
+        // sleepEditedDaily fold. The Context-aware caller reads NoopPrefs.manualSleepOnly. Default false
+        // keeps every existing caller/test byte-identical.
+        manualSleepOnly: Boolean = false,
     ): List<Computed> = withContext(Dispatchers.Default) {
         // Serialise the whole pass so overlapping callers never run two rescores in parallel (see
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
@@ -228,7 +233,7 @@ object IntelligenceEngine {
             val (out, healed) = analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow)
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, manualSleepOnly)
             if (healed == 0) out
             // #899 heal re-pass: the pass above deleted overlapping duplicate sleep sessions AFTER its days
             // were scored, and the read-side dedup those days consumed had no bank-recency witness (the fresh
@@ -238,7 +243,7 @@ object IntelligenceEngine {
             else analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow).first
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, manualSleepOnly).first
         }
     }
 
@@ -328,6 +333,9 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night default when
         // false. Threaded into analyzeDay per scored night.
         deepHrvWindow: Boolean = false,
+        // Manual-sleep-only mode — threaded into analyzeDay so automatic detection is skipped per day.
+        // See the public overload's doc. Default false.
+        manualSleepOnly: Boolean = false,
         // #899 heal re-pass: the second component of the return is how many overlapping duplicate sleep
         // sessions the heal below deleted this pass. The public wrapper re-runs ONCE when it is non-zero
         // so the affected days re-score against the cleaned store.
@@ -547,6 +555,18 @@ object IntelligenceEngine {
                 bandSleepState = bandSleepStateSamples(repo, computedId, from, to)
             }
 
+            // Manual-sleep-only: the user's OWN logged nights are the day's sleep. Read the userEdited
+            // rows under the computed source (what the Sleep screen's bedtime/wake marks write via
+            // addManualNap) that END on this day — the same end-day attribution analyzeDay's `matched`
+            // filter uses — and hand them to analyzeDay to be SCORED like detected nights. Without this
+            // the mode produced no sessions at all, so restingHr/avgHrv (and Charge) went null: the
+            // later edit-fold restores duration + stages only. Read only when the mode is on, so the
+            // default path costs nothing.
+            val manualWindows: List<Pair<Long, Long>> = if (!manualSleepOnly) emptyList() else
+                repo.sleepSessions(computedId, from, to, STREAM_LIMIT)
+                    .filter { it.userEdited && AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) == day }
+                    .map { it.effectiveStartTs to it.endTs }
+
             val res = AnalyticsEngine.analyzeDay(
                 day = day,
                 hr = hr,
@@ -578,6 +598,11 @@ object IntelligenceEngine {
                 useSleepStagerV2 = useExperimentalSleepV2,
                 // #364 follow-up: same threading for the motion-aware wake refinement post-pass.
                 useMotionAwareWake = useMotionAwareWake,
+                // Manual-sleep-only: skip automatic detection and score the user's OWN logged windows
+                // (read above) through the identical per-session physiology, so RHR/HRV/Charge behave
+                // exactly as they do for a detected night.
+                manualSleepOnly = manualSleepOnly,
+                manualSleepWindows = manualWindows,
                 // Sleep & Rest test mode (Test Centre E5): thread the trace sink straight through. null (the
                 // default) keeps analyzeDay's byte-identical untraced path; when the caller passed a non-null
                 // sink (mode on), detectSleep's gate trace + the Rest sub-score line route to the .sleep-tagged
@@ -643,7 +668,7 @@ object IntelligenceEngine {
             nightlySkinByDay[day] = res.nightlySkinTempC
             nightlyRespByDay[day] = res.daily.respRateBpm
             // ── RHR floor-vs-mean diagnostic (#691) ────────────────────────────────────────────────
-            // Make the recurring "NOOP's resting HR reads LOWER than my sleeping-HR app" reports
+            // Make the recurring "POOP's resting HR reads LOWER than my sleeping-HR app" reports
             // explainable from the strap log instead of a guess. The two numbers measure different
             // things BY DESIGN, not a bug: NOOP's restingHr is the WHOOP-style FLOOR (the lowest
             // sustained 5-min in-bed level , SleepStager picks the min 5-min rolling-mean HR per session,
@@ -788,7 +813,9 @@ object IntelligenceEngine {
         // and nothing about the imported numbers is exposed. WHOOP wins over Apple, matching the merge's
         // source priority. Mirrors the Swift `importedWhoopDays` / `appleHealthDays` sets.
         val importedWhoopDays = hist.map { it.day }.toHashSet()
-        val appleHealthDays = repo
+        // Gated on one cheap COUNT: with the importers removed nothing can write these rows, so the
+        // whole-table scan was guaranteed empty on every analysis.
+        val appleHealthDays = if (!repo.hasImportedDailySources()) emptySet() else repo
             .appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, "0000-01-01", "9999-12-31")
             .map { it.day }.toHashSet()
 
@@ -1085,13 +1112,16 @@ object IntelligenceEngine {
         // Apple-Health importer banks `steps` in AppleDaily (DailyMetric holds only sleep/HR/HRV , see
         // AppleHealthImporter), so read appleDaily here, not dailyMetrics, or the reference is always empty
         // and NO phone-step calibration ever fits (the cause of the "Not calibrated" reports on #37).
-        val appleRows = repo.appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, calOldest, newestDay)
+        val hasImported = repo.hasImportedDailySources()
+        val appleRows = if (!hasImported) emptyList()
+        else repo.appleDaily(WhoopRepository.APPLE_HEALTH_SOURCE, calOldest, newestDay)
         val refStepsByDay = HashMap<String, Double>()
         for (r in appleRows) { val s = r.steps; if (s != null && s > 0) refStepsByDay[r.day] = s.toDouble() }
         // #37: Health Connect steps (imported under "health-connect", also in appleDaily) are a phone
         // reference too , union them in so HC-only users get a step calibration. Apple-health WINS on a
         // same-day overlap (only fill days apple didn't already supply).
-        val hcStepRows = repo.appleDaily(WhoopRepository.HEALTH_CONNECT_SOURCE, calOldest, newestDay)
+        val hcStepRows = if (!hasImported) emptyList()
+        else repo.appleDaily(WhoopRepository.HEALTH_CONNECT_SOURCE, calOldest, newestDay)
         for (r in hcStepRows) {
             val s = r.steps
             if (s != null && s > 0 && !refStepsByDay.containsKey(r.day)) refStepsByDay[r.day] = s.toDouble()
@@ -1777,7 +1807,7 @@ object IntelligenceEngine {
      * HR , the lowest SUSTAINED 5-min in-bed level (SleepStager picks the min 5-min rolling-mean HR per
      * session, the day takes the min across them) , whereas a "sleeping HR" app reports the night MEAN
      * over the whole asleep span. The mean always sits at-or-above the floor, so NOOP reading lower is
-     * BY DESIGN, not a bug; logging both makes a "NOOP RHR is lower than my other app" report explainable
+     * BY DESIGN, not a bug; logging both makes a "POOP RHR is lower than my other app" report explainable
      * from the strap log. [inBedBpms] is the bpm of every HR sample inside a matched in-bed session (the
      * SAME span the floor came from, so the two numbers are directly comparable). Empty in-bed → nightMean
      * is "nil". Counts/bpm only , no timestamps or PII. Pure so it's unit-tested directly and is the SAME
@@ -1787,6 +1817,6 @@ object IntelligenceEngine {
         val meanLog = if (inBedBpms.isEmpty()) "nil"
             else Math.round(inBedBpms.sum().toDouble() / inBedBpms.size).toString()
         return "rhr day=$day floor=$floor nightMean=$meanLog inBedSamples=${inBedBpms.size} " +
-            "(floor = WHOOP-style lowest-sustained = NOOP RHR; mean = sleeping-HR-app number)"
+            "(floor = WHOOP-style lowest-sustained = POOP RHR; mean = sleeping-HR-app number)"
     }
 }

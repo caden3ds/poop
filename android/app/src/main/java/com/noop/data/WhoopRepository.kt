@@ -555,13 +555,9 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun recentLiveSessions(deviceId: String, limit: Int): List<LiveSessionRow> =
         dao.recentLiveSessions(deviceId, limit)
 
-    // MARK: - Lab Book markers (Swift labMarker, v17). Writing also projects the daily series into
-    // metricSeries under WhoopDao.LAB_BOOK_SOURCE_ID, so Compare/Explore/Coach see markers unchanged.
-    suspend fun upsertLabMarkers(rows: List<LabMarkerRow>) = dao.upsertLabMarkers(rows)
-    suspend fun deleteLabMarker(id: String): Boolean = dao.deleteLabMarker(id)
-    suspend fun labMarkersByKey(deviceId: String, markerKey: String) = dao.labMarkersByKey(deviceId, markerKey)
-    suspend fun labMarkersByCategory(deviceId: String, category: String) = dao.labMarkersByCategory(deviceId, category)
-    suspend fun markerKeysPresent(deviceId: String) = dao.markerKeysPresent(deviceId)
+    // The Lab Book read/write API lived here. It went with the Lab Book screen: nothing called it, and
+    // nothing can write a marker any more. The `labMarker` TABLE is deliberately left in place —
+    // migrations here are additive, and an unused table is cheaper than a destructive migration.
 
     // MARK: - Reads
 
@@ -1000,6 +996,32 @@ class WhoopRepository(private val dao: WhoopDao) {
     /** Scalar COUNT twin of [appleDaily] for count badges. */
     suspend fun appleDailyCount(deviceId: String, from: String, to: String): Int =
         dao.appleDailyCount(deviceId, from, to)
+
+    /**
+     * Is there ANY imported Apple-Health / Health-Connect daily data at all?
+     *
+     * Since the importers were removed, nothing in the shipping app can write these rows — only the
+     * demo flavour's seeder does. Several screens were nonetheless issuing whole-table scans
+     * ("0000-01-01".."9999-12-31") against both sources on every mount, guaranteed to come back empty.
+     * This is the cheap gate they check first: two indexed COUNTs instead of two full scans, and the
+     * answer is cached for the process because these rows cannot appear while the app is running.
+     *
+     * Deliberately a data question, not a `BuildConfig.ENABLE_DEMO` check: a demo build still has the
+     * rows and must still show them, and a user carrying legacy rows keeps seeing them too.
+     */
+    suspend fun hasImportedDailySources(): Boolean {
+        cachedHasImportedDaily?.let { return it }
+        val any = runCatching {
+            appleDailyCount(APPLE_HEALTH_SOURCE, "0000-01-01", "9999-12-31") > 0 ||
+                appleDailyCount(HEALTH_CONNECT_SOURCE, "0000-01-01", "9999-12-31") > 0
+        }.getOrDefault(false)
+        cachedHasImportedDaily = any
+        return any
+    }
+
+    /** Process-lifetime cache for [hasImportedDailySources]; see its note on why this is safe. */
+    @Volatile
+    private var cachedHasImportedDaily: Boolean? = null
 
     /** All cached daily metrics for a device, oldest first. Feeds com.noop.analytics.IllnessWatch. */
     suspend fun days(deviceId: String): List<DailyMetric> = dao.days(deviceId)
@@ -1451,7 +1473,7 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun latestBattery(deviceId: String): BatterySample? = dao.latestBattery(deviceId)
 
     companion object {
-        /** A workout row is STRAP-NATIVE when NOOP recorded/scored it from a strap trace: a "manual"
+        /** A workout row is STRAP-NATIVE when POOP recorded/scored it from a strap trace: a "manual"
          *  session or a detected bout (source "<id>-noop"). Everything else (Apple Health / Health Connect /
          *  WHOOP CSV / activity file) is IMPORTED and carries its own avg/max. Single source of truth for the
          *  classification shared by [fillWorkoutHrFromStrap] and [workoutHrDeviceId]. */
