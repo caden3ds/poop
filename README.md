@@ -79,12 +79,13 @@ Bluetooth cannot be tested in an emulator — the strap path needs real hardware
 
 ## Credit
 
-Built on [NOOP](https://github.com/NoopApp/noop) and [@ryanbr's fork](https://github.com/ryanbr/noop),
-which did the hard work: the clean-room WHOOP protocol, the analytics, and the Android app this
-started from. Their prior-art credits (`johnmiddleton12/my-whoop`, `b-nnett/goose`) are preserved in
-[ATTRIBUTION.md](ATTRIBUTION.md) and [NOTICE](NOTICE).
+Poop is a fork of **NOOP**, which did the hard work this is built on: the clean-room WHOOP protocol,
+the analytics, and the Android app it started from. Full upstream and prior-art attribution lives in
+[ATTRIBUTION.md](ATTRIBUTION.md) and [NOTICE](NOTICE), and the same credit is shown in-app under
+Settings → About.
 
-Licensed under [PolyForm Noncommercial 1.0.0](LICENSE), inherited from upstream.
+Licensed under [PolyForm Noncommercial 1.0.0](LICENSE), inherited from upstream. The required
+copyright notice is retained in [LICENSE](LICENSE); it is not ours to remove.
 
 ## Not affiliated with WHOOP. Not a medical device.
 

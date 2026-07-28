@@ -2333,7 +2333,7 @@ fun SettingsScreen(
                     StatePill("v${BuildConfig.VERSION_NAME}", tone = StrandTone.Neutral, showsDot = false)
                 }
 
-                // Project home — NOOP's code, releases, issues and wiki live on GitHub.
+                // Project home — this fork's code, releases and issues.
                 val projectHomeInteraction = remember { MutableInteractionSource() }
                 Box(
                     modifier = Modifier
@@ -2346,11 +2346,11 @@ fun SettingsScreen(
                             interactionSource = projectHomeInteraction,
                             indication = null,
                         ) {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/ryanbr/noop"))
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/caden3ds/poop"))
                             try {
                                 context.startActivity(intent)
                             } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(context, "github.com/ryanbr/noop", Toast.LENGTH_LONG).show()
+                                Toast.makeText(context, "github.com/caden3ds/poop", Toast.LENGTH_LONG).show()
                             }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -2533,6 +2533,28 @@ fun SettingsScreen(
                         }
                         Text("›", style = NoopType.title2, color = Palette.accent)
                     }
+                }
+
+                RowDivider()
+
+                // CREDITS — the one place upstream is acknowledged, rather than scattering other
+                // people's handles and repo links through the app. The engineering provenance stays in
+                // the source comments, where it is useful; this is the user-facing version.
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Credits", style = NoopType.headline, color = Palette.textPrimary)
+                    Text(
+                        "Poop is a personal fork of NOOP, which did the hard work this is built on: " +
+                            "the clean-room WHOOP protocol, the analytics, and the Android app itself. " +
+                            "Prior art credited in the project's ATTRIBUTION and NOTICE files.",
+                        style = NoopType.footnote,
+                        color = Palette.textSecondary,
+                    )
+                    Text(
+                        "Licensed under PolyForm Noncommercial 1.0.0, inherited from upstream. " +
+                            "Not affiliated with WHOOP, Inc.",
+                        style = NoopType.footnote,
+                        color = Palette.textTertiary,
+                    )
                 }
             }
         }

@@ -89,7 +89,9 @@ object TestReportLink {
             // CAPTURE-A: seed what_happens so the body is never empty (#812).
             if (!whatHappensSeed.isNullOrBlank()) add("what_happens" to whatHappensSeed)
         }
-        val base = "https://github.com/ryanbr/noop/issues/new?"
+        // This fork's OWN tracker. It pointed at the upstream repo, which would have filed this
+        // fork's bug reports on someone else's project.
+        val base = "https://github.com/caden3ds/poop/issues/new?"
         fun render(list: List<Pair<String, String>>) = base + list.joinToString("&") { (k, v) -> "$k=${enc(v)}" }
         // Add the log block ONLY if the whole URL stays under the GitHub prefill ceiling; otherwise drop it
         // entirely (never truncate into a broken <details>) and rely on the attached/shared .zip (#812).

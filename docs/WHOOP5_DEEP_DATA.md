@@ -1,7 +1,7 @@
 # WHOOP 5.0 / MG deep data — the "R22" unlock
 
 **Status:** experimental, opt-in, awaiting on-hardware confirmation.
-**Tracking:** [#103](https://github.com/ryanbr/noop/issues/103) (raw HCI captures + new deep-record layouts).
+**Tracking:** [#103](https://github.com/caden3ds/poop/issues/103) (raw HCI captures + new deep-record layouts).
 
 ## The problem
 
@@ -23,7 +23,7 @@ This was reached independently three ways, which is why we trust it:
 |---|---|---|
 | [judes.club — "Cracking the WHOOP 5 Bluetooth Protocol"](https://judes.club/writing/cracking-the-whoop-5-bluetooth-protocol/) + [interactive spec](https://judes.club/experiments/whoop5/) | iOS HCI capture of the official app | The full frame format + the exact 15-flag enable sequence **with values**. Our `Whoop5Config` golden test is validated byte-for-byte against its frame-builder. |
 | [Asherlc/dofek](https://github.com/Asherlc/dofek/blob/main/docs/whoop-ble-protocol.md) | Android APK decompilation | The config opcodes (`0x73 START_DEVICE_CONFIG_KEY_EXCHANGE`, `0x78 SET_FF_VALUE`) and the same key names/values. |
-| A community BTSnoop capture ([#103](https://github.com/ryanbr/noop/issues/103)) | Bluetooth HCI log of the official app on a real strap | Independently surfaced the same `enable_r22_*` console report + the channel layout. |
+| A community BTSnoop capture ([#103](https://github.com/caden3ds/poop/issues/103)) | Bluetooth HCI log of the official app on a real strap | Independently surfaced the same `enable_r22_*` console report + the channel layout. |
 
 ## Channel layout (5.0 / MG)
 
@@ -61,7 +61,7 @@ values, is in [`Whoop5Config.swift`](../Packages/WhoopProtocol/Sources/WhoopProt
 and [`Whoop5Config.kt`](../android/app/src/main/java/com/noop/protocol/Whoop5Config.kt), golden-tested on
 both platforms. `enable_r22_packets` is the one that opens the type-`0x2F` biometric stream; the rest
 tune channel selection, wear detection and sleep behaviour. Flags 1–15 come from judes.club's
-frame-builder; the 16th, `enable_sig12`, was added from a real on-strap HCI capture ([#103](https://github.com/ryanbr/noop/issues/103))
+frame-builder; the 16th, `enable_sig12`, was added from a real on-strap HCI capture ([#103](https://github.com/caden3ds/poop/issues/103))
 that otherwise reproduced flags 1–15 byte-for-byte in this order.
 
 ## How NOOP uses it (opt-in, reversible)
@@ -92,7 +92,7 @@ that otherwise reproduced flags 1–15 byte-for-byte in this order.
 
 ## Why SpO₂ (and the raw respiration track) aren't available on 5.0
 
-This is the single most common "is it broken?" report (e.g. [#623](https://github.com/ryanbr/noop/issues/623)),
+This is the single most common "is it broken?" report (e.g. [#623](https://github.com/caden3ds/poop/issues/623)),
 so the reasoning in one place:
 
 **It is not an encryption problem.** NOOP decodes the entire 5.0 (v18) record in plaintext — HR, R-R,
@@ -104,7 +104,7 @@ for. The barrier is that the SpO₂ data simply isn't *in* the stream in a usabl
   18,602 real records — it does not match; those channels track HR/motion, and there is no identifiable
   red/IR pair. Pulse oximetry fundamentally needs two wavelengths; the 5.0's decodable stream doesn't
   expose them (the v26 PPG waveform is single-channel, HR only). However, a decompile-sourced decode
-  ([#103](https://github.com/ryanbr/noop/issues/103)) reads v18 byte `@82` as a **strap-computed SpO₂ %
+  ([#103](https://github.com/caden3ds/poop/issues/103)) reads v18 byte `@82` as a **strap-computed SpO₂ %
   scalar** (tri-mode: 70–100 = real %, bit-7 = saturation sentinel, other sub-70 = diagnostic code;
   sleep-only). The evidence is currently **split**: an 8-night independent validation with real spread
   (corr +0.99, ~0.4 %/night) clears the cross-night bar, but the two nights checked on the original #103
@@ -155,7 +155,7 @@ Two stdlib tools in [`Tools/linux-capture/`](../Tools/linux-capture/) do this:
 
 Crucially this is **privacy-preserving**: both tools run locally and the correlation output is only
 offsets/encodings, never health values — so a 5/MG owner can contribute a confirmed field mapping to
-[#103](https://github.com/ryanbr/noop/issues/103) without posting their capture or their data export.
+[#103](https://github.com/caden3ds/poop/issues/103) without posting their capture or their data export.
 A mapped offset still follows the project rule — *real captures, never invented offsets* — before it
 lands in `parseFrameWhoop5` / `whoop_protocol.json`.
 
@@ -163,13 +163,13 @@ lands in `parseFrameWhoop5` / `whoop_protocol.json`.
 
 1. Update to the latest NOOP, **Settings → Experimental → "Unlock WHOOP 5/MG deep data (R22)"**.
 2. With the strap **on and bonded**, tap **Send enable sequence to strap**.
-3. Keep wearing it, let it sync, then **share your strap log** on [#103](https://github.com/ryanbr/noop/issues/103) — we're looking for new deep
+3. Keep wearing it, let it sync, then **share your strap log** on [#103](https://github.com/caden3ds/poop/issues/103) — we're looking for new deep
    records (type `0x2F`) to start arriving.
 4. Even better: a Bluetooth HCI capture of the **official app syncing a full night's history** shows the deep
    packets actually flowing and their layout. Method: iOS **PacketLogger** (Bluetooth diagnostic profile → `.pklg`)
    or Android **Developer Options → Bluetooth HCI snoop log** → `btsnoop_hci.log`, opened in Wireshark — the
    same iOS-HCI approach the [judes.club write-up](https://judes.club/writing/cracking-the-whoop-5-bluetooth-protocol/)
-   used. Filter to just the WHOOP peripheral and attach it to [#103](https://github.com/ryanbr/noop/issues/103).
+   used. Filter to just the WHOOP peripheral and attach it to [#103](https://github.com/caden3ds/poop/issues/103).
 
 Credit to **judes.club**, **Asherlc/dofek**, and **b-nnett/goose** for the public protocol work this
 builds on.
