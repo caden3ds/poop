@@ -27,6 +27,7 @@ import com.noop.alarm.SmartAlarmStore
 import com.noop.analytics.LiveRemEstimator
 import com.noop.analytics.LucidCuePolicy
 import com.noop.ui.LucidPrefs
+import com.noop.ui.NotifPrefs
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.RestScorer
@@ -42,6 +43,7 @@ import com.noop.widget.WidgetSnapshotStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.catch
@@ -163,6 +165,12 @@ class WhoopConnectionService : Service() {
     /** The smart-alarm HR collector, alive for the life of the service. */
     private var alarmJob: Job? = null
 
+    /** Holds the realtime HR stream open across the sleeping hours while lucid night cueing is on.
+     *  Runs on its OWN timer rather than off the HR collector: the collector only ticks when heart rate
+     *  arrives, and heart rate only arrives once the stream is armed — so driving the arming from there
+     *  could never start. That circularity is why the feature was inert on its first two nights. */
+    private var lucidCaptureJob: Job? = null
+
     private val ble get() = (application as NoopApplication).ble
     private val repo get() = (application as NoopApplication).repository
 
@@ -218,6 +226,8 @@ class WhoopConnectionService : Service() {
 
         // Same repair from the service: it outlives the app, so this covers days the user never opens it.
         runCatching { com.noop.alarm.LucidRealityCheckScheduler.ensureScheduledForToday(this) }
+
+        startLucidCaptureLoop()
 
         // Listen for the OS Bluetooth radio toggling so turning it off tears the link down at once (#314).
         // Guarded so repeat onStartCommands (every connect / OS restart) don't stack registrations.
@@ -476,6 +486,42 @@ class WhoopConnectionService : Service() {
     }
 
     /**
+     * Keep the realtime HR stream armed across the sleeping hours whenever lucid night cueing is on.
+     *
+     * Re-evaluated on a slow timer so it picks up the window opening/closing and the user toggling the
+     * feature, without needing the app open. Releasing outside the window matters as much as arming
+     * inside it — an all-day realtime stream is a serious battery drain for no benefit.
+     */
+    private fun startLucidCaptureLoop() {
+        lucidCaptureJob?.cancel()
+        lucidCaptureJob = scope.launch {
+            while (true) {
+                runCatching {
+                    val want = LucidPrefs.nightEnabled(this@WhoopConnectionService) &&
+                        withinSleepingHours(System.currentTimeMillis())
+                    ble.setLucidNightCapture(want)
+                }
+                delay(LUCID_CAPTURE_TICK_MS)
+            }
+        }
+    }
+
+    /**
+     * Is [nowMs] inside the sleeping-hours window the realtime stream may be held open for?
+     *
+     * Reuses the notification quiet-hours window, which is the app's existing "the user is in bed"
+     * definition — rather than inventing a second one that could disagree with it. Wraps midnight.
+     */
+    private fun withinSleepingHours(nowMs: Long): Boolean {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+        val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
+        val start = NotifPrefs.getInt(this, NotifPrefs.QUIET_START, 22 * 60)
+        val end = NotifPrefs.getInt(this, NotifPrefs.QUIET_END, 7 * 60)
+        return if (start <= end) minuteOfDay in start until end
+        else minuteOfDay >= start || minuteOfDay < end
+    }
+
+    /**
      * Re-establish the link to the remembered strap when the service is running without one.
      *
      * Safe to call on every onStartCommand: it no-ops when already connected, when the user opted out
@@ -594,6 +640,10 @@ class WhoopConnectionService : Service() {
     }
 
     override fun onDestroy() {
+        // Release the lucid hold explicitly: leaving it armed after teardown would keep the strap
+        // streaming with nothing listening.
+        runCatching { ble.setLucidNightCapture(false) }
+        lucidCaptureJob?.cancel()
         if (bluetoothReceiverRegistered) {
             // unregisterReceiver throws if it was never registered; the flag guards that, and runCatching
             // covers the rare case the OS already reclaimed it.
@@ -758,6 +808,10 @@ class WhoopConnectionService : Service() {
         /** HR at or below this counts as "asleep" for the lucid cycle prior — the same ceiling
          *  [SleepWindowWatcher] uses. */
         /** How far back to look for scored nights when learning the REM template. */
+        /** How often the lucid capture loop re-evaluates. Slow on purpose — it only has to notice the
+         *  window opening/closing and the toggle changing. */
+        private const val LUCID_CAPTURE_TICK_MS = 5 * 60_000L
+
         private const val LUCID_TEMPLATE_LOOKBACK_DAYS = 30L
 
         /** Cap on nights folded into the template — recent enough to reflect current physiology. */

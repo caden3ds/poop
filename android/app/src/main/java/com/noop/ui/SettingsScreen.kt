@@ -1064,7 +1064,8 @@ fun SettingsScreen(
                         "${LiveRemEstimator.MIN_TRAINING_NIGHTS} scored " +
                         (if (LiveRemEstimator.MIN_TRAINING_NIGHTS == 1) "night" else "nights") +
                         " first to learn your own pattern, and does nothing until then. Fewer nights " +
-                        "means a rougher guess. This will sometimes wake you.",
+                        "means a rougher guess. Holds the heart-rate stream open overnight to detect " +
+                        "REM, which uses noticeably more battery. This will sometimes wake you.",
                     checked = lucidNight,
                     onCheckedChange = {
                         lucidNight = it

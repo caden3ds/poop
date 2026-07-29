@@ -2140,6 +2140,12 @@ class WhoopBleClient(
      *  intent; the effective want is window-gated through [continuousCaptureWantsNow] when "overnight
      *  only" is on, re-derived at every arm site. */
     @Volatile private var keepStreamForData = false
+
+    /** Lucid night cueing needs live HR to estimate REM, so while it is active it must hold the realtime
+     *  stream open ITSELF. Without this the feature was inert overnight: with no screen open and the
+     *  continuous-capture preference off (its default), nothing armed the stream, every tick saw a null
+     *  heart rate, and no cue could ever fire. Set by the foreground service. */
+    @Volatile private var lucidNightWantsRealtime = false
     /** Derived want: the realtime stream should be armed while EITHER a screen wants it OR the
      *  continuous-capture preference wants it. The keep-alive re-arms it so it can't lapse, and the
      *  post-bond branch arms it on connect. Recomputed inside [reconcileRealtime] and RE-DERIVED at the
@@ -5003,6 +5009,23 @@ class WhoopBleClient(
      *  default). RE-DERIVED at every arm site (reconcile / keep-alive tick / post-bond arm) instead of
      *  precomputed, so a reconnect outside the window can never arm the stream from a stale value.
      *  Mirrors the Swift `continuousCaptureWantsNow`. */
+    /**
+     * Hold the realtime stream open for lucid night cueing (or release it).
+     *
+     * A third, independent "want" alongside the Live screen and the continuous-capture preference —
+     * reconciled by the same edge logic, so it never fights them: whichever wants the stream keeps it
+     * armed, and it only disarms once none do.
+     *
+     * This DOES cost battery: an overnight realtime stream is one of the larger drains, which is why the
+     * caller windows it to the sleeping hours rather than holding it all day.
+     */
+    fun setLucidNightCapture(on: Boolean) {
+        if (lucidNightWantsRealtime == on) return
+        lucidNightWantsRealtime = on
+        log("Lucid: realtime stream ${if (on) "held open for REM estimation" else "released"}")
+        reconcileRealtime()
+    }
+
     private fun continuousCaptureWantsNow(): Boolean {
         if (!keepStreamForData) return false
         // #477: optional power-saving pause — while power saving is ACTIVE (battery ≤ threshold or Battery
@@ -5050,7 +5073,7 @@ class WhoopBleClient(
             handler.post { reconcileRealtime() }
             return
         }
-        val want = screenWantsRealtime || continuousCaptureWantsNow()
+        val want = screenWantsRealtime || continuousCaptureWantsNow() || lucidNightWantsRealtime
         wantsRealtime = want   // the keep-alive + post-bond arm-on-connect read this derived value
         if (want == realtimeArmed) return                          // no edge — nothing to send
         if (connectedFamily != DeviceFamily.WHOOP4 && !_state.value.bonded) return   // can't reach the strap yet
