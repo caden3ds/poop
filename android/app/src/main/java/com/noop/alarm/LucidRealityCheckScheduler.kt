@@ -168,6 +168,7 @@ class LucidRealityCheckReceiver : BroadcastReceiver() {
             LucidPrefs.dayStartMin(context),
             LucidPrefs.dayEndMin(context),
         )
+        if (!inWindow) LucidNightLog.log(context, "DAY cue dropped — delivered outside the waking window")
         if (inWindow) runCatching {
             val app = context.applicationContext as com.noop.NoopApplication
             val prefs = LucidPrefs.of(context)
@@ -182,8 +183,10 @@ class LucidRealityCheckReceiver : BroadcastReceiver() {
             val connected = app.ble.state.value.connected
             if (connected) {
                 app.ble.buzzLucidCue(bursts = 1)
+                LucidNightLog.log(context, "DAY cue fired")
             } else {
                 app.ble.externalLog("Lucid: reality check due, but no strap connected — skipped")
+                LucidNightLog.log(context, "DAY cue SKIPPED — no strap connected")
             }
             prefs.edit()
                 .putString(LucidPrefs.DAY_KEY, today)

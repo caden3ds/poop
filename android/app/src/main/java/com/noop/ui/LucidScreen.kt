@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.noop.alarm.LucidNightLog
 import com.noop.alarm.LucidRealityCheckScheduler
 import com.noop.alarm.LucidTemplateLoader
 import com.noop.analytics.LiveRemEstimator
@@ -120,6 +121,7 @@ fun LucidScreen(vm: AppViewModel) {
         }
 
         item { LucidLastNightCard(nightEnabled) }
+        item { LucidNightLogCard() }
         item { LucidLiveTestCard(vm) }
     }
 }
@@ -146,6 +148,82 @@ private fun LucidLastNightCard(nightEnabled: Boolean) {
                 style = NoopType.subhead,
                 color = Palette.textSecondary,
             )
+        }
+    }
+}
+
+/**
+ * The night timeline, straight off disk.
+ *
+ * The aggregate diagnostic says WHICH link broke; this says when and in what order, which is what
+ * every diagnosis so far actually needed and had to be reconstructed without. Shown newest-first
+ * because the interesting part of a night is usually its end, with a share action so it can leave the
+ * phone without a cable.
+ */
+@Composable
+private fun LucidNightLogCard() {
+    val context = LocalContext.current
+    var text by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(expanded) { text = LucidNightLog.read(context) }
+
+    NoopCard {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Overline("Night log")
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (text.isBlank()) "empty" else "${text.lines().size} lines",
+                    style = NoopType.footnote,
+                    color = Palette.textTertiary,
+                )
+            }
+            if (text.isBlank()) {
+                Text(
+                    "Nothing logged yet. Entries are written when the stream arms, when REM is entered " +
+                        "or left, when a cue fires, and every few minutes as a heartbeat.",
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+            } else {
+                // Newest first: a night's ending is usually the part worth reading.
+                val shown = text.trim().lines().reversed().let { if (expanded) it else it.take(12) }
+                Text(
+                    shown.joinToString(separator = System.lineSeparator()),
+                    style = NoopType.footnote,
+                    color = Palette.textSecondary,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    NoopButton(
+                        text = if (expanded) "Show less" else "Show all",
+                        kind = NoopButtonKind.Tertiary,
+                        onClick = { expanded = !expanded },
+                    )
+                    NoopButton(
+                        text = "Share",
+                        kind = NoopButtonKind.Tertiary,
+                        onClick = {
+                            runCatching {
+                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "Poop lucid night log")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(send, "Share night log"),
+                                )
+                            }
+                        },
+                    )
+                    Spacer(Modifier.weight(1f))
+                    NoopButton(
+                        text = "Clear",
+                        kind = NoopButtonKind.Tertiary,
+                        onClick = { LucidNightLog.clear(context); text = "" },
+                    )
+                }
+            }
         }
     }
 }

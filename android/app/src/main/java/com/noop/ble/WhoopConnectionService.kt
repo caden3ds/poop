@@ -18,6 +18,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.noop.NoopApplication
 import com.noop.R
+import com.noop.alarm.LucidNightLog
 import com.noop.alarm.LucidNightRunner
 import com.noop.alarm.NightTroughTracker
 import com.noop.alarm.RebuzzWatcher
@@ -151,6 +152,13 @@ class WhoopConnectionService : Service() {
 
     /** The local date the lucid night counters + template belong to; a new date resets both. */
     private var lucidNightKey: String? = null
+
+    /** Last values written to [LucidNightLog], so only CHANGES are logged. A 1 Hz stream is ~29k ticks
+     *  a night; logging each would bury the signal and cost battery for nothing. */
+    private var lucidLoggedInRem: Boolean? = null
+    private var lucidLoggedHold: String? = null
+    private var lucidLoggedArmed: Boolean? = null
+    private var lucidLastHeartbeatMs = 0L
 
     /** First HR tick of this sleep stretch at or below the sleep ceiling — the approximate sleep onset
      *  the REM cycle prior is measured from. APPROXIMATE on purpose: it is the same "under the ceiling"
@@ -519,6 +527,15 @@ class WhoopConnectionService : Service() {
                     val want = LucidPrefs.nightEnabled(this@WhoopConnectionService) &&
                         withinSleepingHours(System.currentTimeMillis())
                     ble.setLucidNightCapture(want)
+                    val (rtWanted, rtArmed, rtBonded) = ble.realtimeStatus
+                    if (lucidLoggedArmed != rtArmed) {
+                        lucidLoggedArmed = rtArmed
+                        LucidNightLog.log(
+                            this@WhoopConnectionService,
+                            "STREAM armed=$rtArmed wanted=$rtWanted bonded=$rtBonded " +
+                                "(window=$want, connected=${ble.state.value.connected})",
+                        )
+                    }
                 }
                 delay(LUCID_CAPTURE_TICK_MS)
             }
@@ -719,6 +736,10 @@ class WhoopConnectionService : Service() {
             val lastCue = prefs.getLong(LucidPrefs.LAST_CUE_AT, 0L)
             lucidRunner.restoreLastCueAt(if (lastCue > 0L) lastCue else null)
             lucidTemplate = null
+            lucidLoggedInRem = null
+            lucidLoggedHold = null
+            lucidLastHeartbeatMs = 0L
+            LucidNightLog.log(this, "NIGHT start key=$todayKey")
             loadLucidTemplate()
         }
 
@@ -796,11 +817,41 @@ class WhoopConnectionService : Service() {
             .putInt(LucidPrefs.LAST_NIGHT_CUES, tick.nextState.cuesTonight)
             .apply()
 
+        // ── Timeline: REM transitions, hold-reason changes, a heartbeat, and every cue. ──────────────
+        val inRemNow = tick.remConfidence?.let { it >= LiveRemEstimator.CUE_THRESHOLD } ?: false
+        if (lucidLoggedInRem != inRemNow) {
+            lucidLoggedInRem = inRemNow
+            LucidNightLog.log(
+                this,
+                "REM ${if (inRemNow) "ENTER" else "exit"} conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +
+                    "hr=$hr floor=${floorNow} asleep=${minutesAsleep}m",
+            )
+        }
+        if (tick.holdReason != null && tick.holdReason != lucidLoggedHold) {
+            lucidLoggedHold = tick.holdReason
+            LucidNightLog.log(this, "HOLD ${tick.holdReason}")
+        }
+        if (now - lucidLastHeartbeatMs >= LUCID_LOG_HEARTBEAT_MS) {
+            lucidLastHeartbeatMs = now
+            LucidNightLog.log(
+                this,
+                "beat hr=$hr floor=$floorNow asleep=${minutesAsleep}m " +
+                    "conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +
+                    "template=${lucidTemplate?.nights ?: -1} armed=$rtArmed cues=${tick.nextState.cuesTonight}",
+            )
+        }
+
         if (tick.arousalStoodDown) {
+            LucidNightLog.log(this, "AROUSAL — standing down for this REM period")
             ble.externalLog("Lucid: stirred after the last cue — standing down for this REM period")
         }
         val strength = tick.cue ?: return
         prefs.edit().putLong(LucidPrefs.LAST_CUE_AT, now).apply()
+        LucidNightLog.log(
+            this,
+            "CUE ${strength.name} conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +
+                "(${tick.nextState.cuesTonight}/${LucidCuePolicy.MAX_CUES_PER_NIGHT} tonight)",
+        )
         ble.buzzLucidCue(strength.bursts)
         ble.externalLog(
             "Lucid: ${strength.name.lowercase()} cue fired " +
@@ -821,6 +872,13 @@ class WhoopConnectionService : Service() {
                     (application as NoopApplication).activeDeviceId,
                 ).template
             }.getOrNull()
+            LucidNightLog.log(
+                this@WhoopConnectionService,
+                "TEMPLATE ${lucidTemplate?.let { "loaded nights=${it.nights} " +
+                    "remElev=${"%.1f".format(it.remElevationBpm)} remVar=${"%.1f".format(it.remInstabilityBpm)} " +
+                    "nonRemElev=${"%.1f".format(it.nonRemElevationBpm)} nonRemVar=${"%.1f".format(it.nonRemInstabilityBpm)} " +
+                    "discriminating=${it.isDiscriminating}" } ?: "NONE"}",
+            )
             if (lucidTemplate == null) {
                 ble.externalLog(
                     "Lucid: not enough scored nights yet to learn your REM pattern — no cues tonight",
@@ -846,6 +904,10 @@ class WhoopConnectionService : Service() {
         /** How often the lucid capture loop re-evaluates. Slow on purpose — it only has to notice the
          *  window opening/closing and the toggle changing. */
         private const val LUCID_CAPTURE_TICK_MS = 5 * 60_000L
+
+        /** Heartbeat cadence for the night log — frequent enough to see the shape of a night, sparse
+         *  enough that a whole night is a few hundred lines. */
+        private const val LUCID_LOG_HEARTBEAT_MS = 5 * 60_000L
 
         /** Hour a lucid "night" rolls over to the next key. Noon — comfortably after any sleep ends and
          *  far from the midnight boundary a night straddles. */
