@@ -1725,4 +1725,5 @@
     <string name="live_autonomic_needs_link">Verbinde das Band, um HRV und Stress zu lesen.</string>
     <string name="live_autonomic_building">Sauberes Fenster wird aufgebaut: %1$d von %2$d Schlagen.</string>
     <string name="live_autonomic_open_day">Stress von heute offnen</string>
+    <string name="nav_lucid">Luzides Traumtraining</string>
 </resources>

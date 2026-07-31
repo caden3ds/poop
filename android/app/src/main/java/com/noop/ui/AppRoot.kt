@@ -137,6 +137,7 @@ private enum class Destination(
 
     // Group: System
     Automations("automations", R.string.nav_automations, Icons.Filled.Bolt),
+    Lucid("lucid", R.string.nav_lucid, Icons.Filled.Bedtime),
     // "Alarms" is the ONE alarm surface (#766): the phone-based Wake Window (light-sleep detection with a
     // guaranteed OS backup), the strap's own firmware wake-alarm, and the wind-down reminder, all in one
     // place. Previously "Wake Window" (#730), but the strap alarm moved in from Automations so the broader
@@ -248,6 +249,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                     )
                 }
                                 composable(Destination.Automations.route) { AutomationsScreen(viewModel) }
+                composable(Destination.Lucid.route) { LucidScreen(viewModel) }
                 composable(Destination.SmartAlarm.route) { SmartAlarmScreen(viewModel) }
                 composable(Destination.Workouts.route) { WorkoutsScreen(viewModel) }
 
@@ -290,6 +292,7 @@ fun AppRoot(viewModel: AppViewModel = viewModel()) {
                         onOpenAlarms = { nav.navigate(Destination.SmartAlarm.route) },
                         onOpenNotifications = { nav.navigate(Destination.Notifications.route) },
                         onOpenAutomations = { nav.navigate(Destination.Automations.route) },
+                        onOpenLucid = { nav.navigate(Destination.Lucid.route) },
                     )
                 }
                 composable(Destination.TestCentre.route) { TestCentreScreen(viewModel) }

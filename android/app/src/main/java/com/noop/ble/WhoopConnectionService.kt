@@ -784,60 +784,17 @@ class WhoopConnectionService : Service() {
     }
 
     /**
-     * Build the personal REM template from recent scored nights.
-     *
-     * Reads each night's stored hypnogram and the HR underneath it, splits the samples into REM and
-     * non-REM SLEEP (wake epochs are EXCLUDED — an awake stretch is high and unstable, exactly what REM
-     * looks like on these two features, so counting it would poison the REM class), and hands the
-     * per-night summaries to [LiveRemEstimator.learnTemplate], which does the actual learning.
-     *
-     * Returns null on any shortfall. That is the whole safety story for cold start: no template means
-     * the estimator refuses, which means no cue fires.
-     */
-    private suspend fun buildLucidTemplate(): LiveRemEstimator.RemTemplate? {
-        val nowS = System.currentTimeMillis() / 1000L
-        val fromS = nowS - LUCID_TEMPLATE_LOOKBACK_DAYS * 86_400L
-        // The ACTIVE strap id, not a hardcoded "my-whoop". A strap paired through the wizard registers
-        // as "whoop-<mac>", so the literal read the wrong device entirely — and since a missing template
-        // is a silent stand-down, that alone made the night half incapable of ever firing.
-        val strapId = (application as NoopApplication).activeDeviceId
-        val sessions = repo.sleepSessionsMerged(strapId, fromS, nowS, limit = 200)
-            .filter { !it.stagesJSON.isNullOrBlank() }
-            .takeLast(LUCID_TEMPLATE_MAX_NIGHTS)
-        if (sessions.isEmpty()) return null
-
-        val samples = ArrayList<LiveRemEstimator.NightSample>(sessions.size)
-        for (session in sessions) {
-            val segments = com.noop.ui.parsePersistedSegments(session.stagesJSON) ?: continue
-            // Union read: live-BLE and offloaded rows can sit under sibling source ids, and a raw
-            // single-id query silently returned none of them.
-            val hr = repo.hrSamplesUnion(strapId, session.startTs, session.endTs, limit = 20_000)
-            if (hr.isEmpty()) continue
-
-            val rem = ArrayList<Double>()
-            val nonRem = ArrayList<Double>()
-            for (sample in hr) {
-                val seg = segments.firstOrNull { sample.ts >= it.start && sample.ts < it.end } ?: continue
-                when (seg.stage) {
-                    "rem" -> rem.add(sample.bpm.toDouble())
-                    // "wake" is deliberately dropped, not bucketed as non-REM.
-                    "light", "deep" -> nonRem.add(sample.bpm.toDouble())
-                }
-            }
-            // The night's own sleeping floor, the same reference the live estimate is measured against.
-            val floor = (rem + nonRem).minOrNull() ?: continue
-            samples.add(LiveRemEstimator.NightSample(remHr = rem, nonRemHr = nonRem, floorBpm = floor))
-        }
-        return LiveRemEstimator.learnTemplate(samples)
-    }
-
-    /**
      * Learn the personal REM template from scored history. Runs off the main thread; leaves
      * [lucidTemplate] null on any shortfall, which makes the estimator stand down rather than guess.
      */
     private fun loadLucidTemplate() {
         scope.launch {
-            lucidTemplate = runCatching { buildLucidTemplate() }.getOrNull()
+            lucidTemplate = runCatching {
+                com.noop.alarm.LucidTemplateLoader.load(
+                    repo,
+                    (application as NoopApplication).activeDeviceId,
+                ).template
+            }.getOrNull()
             if (lucidTemplate == null) {
                 ble.externalLog(
                     "Lucid: not enough scored nights yet to learn your REM pattern — no cues tonight",

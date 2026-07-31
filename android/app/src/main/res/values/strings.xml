@@ -1734,4 +1734,5 @@
     <string name="live_autonomic_needs_link">Connect the strap to read HRV and stress.</string>
     <string name="live_autonomic_building">Building a clean window: %1$d of %2$d beats.</string>
     <string name="live_autonomic_open_day">Open today’s stress</string>
+    <string name="nav_lucid">Lucid dream training</string>
 </resources>
