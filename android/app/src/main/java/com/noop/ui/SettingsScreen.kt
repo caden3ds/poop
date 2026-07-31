@@ -1087,6 +1087,12 @@ fun SettingsScreen(
                     },
                 )
                 RowDivider()
+                // LAST NIGHT — which link of the chain the night actually reached. A silent morning
+                // looks the same whichever link broke, so this states it plainly rather than leaving
+                // the user (and me) guessing from the absence of a buzz.
+                Text(lucidLastNightSummary(context), style = NoopType.footnote, color = Palette.textSecondary)
+
+                RowDivider()
                 // Feel the pattern on demand. Without this the only way to check the cue is distinct is
                 // to wait for a random slot — which is exactly how a merged, notification-like buzz went
                 // unnoticed until it fired for real.
@@ -2690,6 +2696,39 @@ private val SEX_OPTIONS = listOf(
     SexOption("female", "Female"),
     SexOption("nonbinary", "Non-binary"),
 )
+
+/**
+ * A plain-English read of last night's lucid diagnostic.
+ *
+ * Deliberately names the FIRST broken link rather than dumping every field: the chain is stream ->
+ * heart rate -> template -> floor -> confidence -> policy, and only the earliest failure is
+ * actionable. Each of those has been the real cause on a different night.
+ */
+private fun lucidLastNightSummary(context: android.content.Context): String {
+    val p = LucidPrefs.of(context)
+    val night = p.getString(LucidPrefs.LAST_NIGHT_KEY, null)
+        ?: return "Last night: nothing recorded yet."
+    val ticks = p.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0)
+    val templateNights = p.getInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, -1)
+    val floor = p.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)
+    val conf = p.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)
+    val cues = p.getInt(LucidPrefs.LAST_NIGHT_CUES, 0)
+    val hold = p.getString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "").orEmpty()
+
+    if (cues > 0) return "$night: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
+    val why = when {
+        ticks == 0 -> "no heart rate reached it — the live stream was never running"
+        templateNights < 0 -> "no REM template yet — needs a scored night with both REM and non-REM"
+        floor <= 0 -> "no sleeping floor measured — the night needs a few hours of heart rate"
+        conf < (LiveRemEstimator.CUE_THRESHOLD * 100).toInt() ->
+            "REM confidence peaked at $conf%, under the $%d%% needed".format(
+                (LiveRemEstimator.CUE_THRESHOLD * 100).toInt(),
+            )
+        hold.isNotEmpty() -> "held: ${hold.lowercase()}"
+        else -> "no cue was due"
+    }
+    return "$night: no cues — $why. ($ticks heart-rate readings.)"
+}
 
 // MARK: - Advanced disclosure persistence (S3)
 

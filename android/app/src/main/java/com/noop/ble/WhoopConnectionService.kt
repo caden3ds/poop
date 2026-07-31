@@ -680,6 +680,14 @@ class WhoopConnectionService : Service() {
                     .putInt(LucidPrefs.CUES_THIS_PERIOD, 0)
                     .putLong(LucidPrefs.LAST_CUE_AT, 0L)
                     .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, false)
+                    // Fresh diagnostic for the new night.
+                    .putString(LucidPrefs.LAST_NIGHT_KEY, todayKey)
+                    .putInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0)
+                    .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, -1)
+                    .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)
+                    .putInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)
+                    .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "")
+                    .putInt(LucidPrefs.LAST_NIGHT_CUES, 0)
                     .apply()
             }
             // Restore the spacing clock so a restart mid-night can't let the ramp fire immediately.
@@ -717,11 +725,24 @@ class WhoopConnectionService : Service() {
             enabled = true,   // already gated above; the policy re-checks its own copy
         )
 
-        // Persist whatever the runner decided the counters should now be.
+        // Persist the counters AND how far down the chain this tick got. Written every tick (cheap,
+        // SharedPreferences batches to disk) so the morning summary reflects the whole night, not just
+        // its last moment.
+        val floorNow = nightTrough.troughBpm(now) ?: 0
+        val confPct = ((tick.remConfidence ?: 0.0) * 100).toInt()
         prefs.edit()
             .putInt(LucidPrefs.CUES_THIS_PERIOD, tick.nextState.cuesThisPeriod)
             .putInt(LucidPrefs.CUES_TONIGHT, tick.nextState.cuesTonight)
             .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, tick.nextState.arousalAbortedPeriod)
+            .putInt(LucidPrefs.LAST_NIGHT_HR_TICKS, prefs.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0) + 1)
+            .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, lucidTemplate?.nights ?: -1)
+            .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, maxOf(floorNow, prefs.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)))
+            .putInt(
+                LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE,
+                maxOf(confPct, prefs.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)),
+            )
+            .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, tick.holdReason ?: "")
+            .putInt(LucidPrefs.LAST_NIGHT_CUES, tick.nextState.cuesTonight)
             .apply()
 
         if (tick.arousalStoodDown) {

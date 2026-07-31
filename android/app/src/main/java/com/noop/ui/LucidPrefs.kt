@@ -51,6 +51,28 @@ object LucidPrefs {
      *  miss — counted separately so it can be surfaced instead of looking like a cue that happened. */
     const val DAY_CUES_SKIPPED = "lucid.dayCuesSkipped"
 
+    // ── Last-night diagnostics ────────────────────────────────────────────────────────────────────
+    //
+    // The night half is a CHAIN — stream armed -> HR arriving -> template learned -> floor measured ->
+    // confidence over threshold -> policy allows. A silent morning looks identical whichever link
+    // broke, which is how three separate root causes each took a night to find. These record which
+    // link the night actually reached, so the answer is readable in the morning instead of guessed.
+
+    /** Local date these figures describe. */
+    const val LAST_NIGHT_KEY = "lucid.lastNight.key"
+    /** HR readings the runner actually received. Zero means the stream was never armed. */
+    const val LAST_NIGHT_HR_TICKS = "lucid.lastNight.hrTicks"
+    /** Nights in the learned template, or -1 when there was none (cold start). */
+    const val LAST_NIGHT_TEMPLATE_NIGHTS = "lucid.lastNight.templateNights"
+    /** Measured sleeping floor (bpm), or 0 when the night never accumulated enough coverage. */
+    const val LAST_NIGHT_FLOOR_BPM = "lucid.lastNight.floorBpm"
+    /** Highest REM confidence reached, as a percent 0..100. */
+    const val LAST_NIGHT_MAX_CONFIDENCE = "lucid.lastNight.maxConfidencePct"
+    /** The most recent reason the policy held, for the nights where everything else was fine. */
+    const val LAST_NIGHT_HOLD_REASON = "lucid.lastNight.holdReason"
+    /** Cues actually fired. */
+    const val LAST_NIGHT_CUES = "lucid.lastNight.cues"
+
     const val DEFAULT_DAY_CUES_PER_DAY = 4
     const val DEFAULT_DAY_START_MIN = 10 * 60   // 10:00
     const val DEFAULT_DAY_END_MIN = 21 * 60     // 21:00
