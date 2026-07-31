@@ -119,18 +119,28 @@ fun LucidScreen(vm: AppViewModel) {
             }
         }
 
-        item { LucidLastNightCard() }
+        item { LucidLastNightCard(nightEnabled) }
         item { LucidLiveTestCard(vm) }
     }
 }
 
 /** Last night's run, stated as the FIRST link that broke — only the earliest failure is actionable. */
 @Composable
-private fun LucidLastNightCard() {
+private fun LucidLastNightCard(nightEnabled: Boolean) {
     val context = LocalContext.current
     NoopCard {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Overline("Last night")
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Overline("Last night")
+                Spacer(Modifier.weight(1f))
+                // State the switch here too: a night that recorded nothing because the feature was off
+                // is the single most likely explanation, and it should not need interpreting.
+                Text(
+                    if (nightEnabled) "cueing on" else "cueing OFF",
+                    style = NoopType.footnote,
+                    color = if (nightEnabled) Palette.statusPositive else Palette.statusWarning,
+                )
+            }
             Text(
                 lucidLastNightSummary(context),
                 style = NoopType.subhead,
@@ -363,8 +373,18 @@ private fun Hairline() {
  */
 private fun lucidLastNightSummary(context: android.content.Context): String {
     val p = LucidPrefs.of(context)
+
+    // "Nothing recorded" conflated three completely different situations — the switch being off, the
+    // service never running, and the night running but reaching nothing. Only the first is the user's
+    // to fix, so name it before anything else.
+    if (!LucidPrefs.nightEnabled(context)) {
+        return "Night cueing is switched off, so nothing was recorded. Turn it on above and it will " +
+            "report on tomorrow morning."
+    }
     val night = p.getString(LucidPrefs.LAST_NIGHT_KEY, null)
-        ?: return "Last night: nothing recorded yet."
+        ?: return "Night cueing is on, but no night has been recorded yet. The first reading is written " +
+            "as soon as the background service sees a heart rate, so an empty result here means the " +
+            "service was not running or the strap was not connected."
     val ticks = p.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0)
     val templateNights = p.getInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, -1)
     val floor = p.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)

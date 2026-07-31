@@ -759,7 +759,12 @@ class WhoopConnectionService : Service() {
             .putInt(LucidPrefs.CUES_THIS_PERIOD, tick.nextState.cuesThisPeriod)
             .putInt(LucidPrefs.CUES_TONIGHT, tick.nextState.cuesTonight)
             .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, tick.nextState.arousalAbortedPeriod)
-            .putInt(LucidPrefs.LAST_NIGHT_HR_TICKS, prefs.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0) + 1)
+            // Count only REAL readings. Counting hr<=0 would inflate the one number that says whether
+            // the stream was live, which is the first thing the morning summary keys off.
+            .putInt(
+                LucidPrefs.LAST_NIGHT_HR_TICKS,
+                prefs.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0) + if (hr > 0) 1 else 0,
+            )
             .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, lucidTemplate?.nights ?: -1)
             .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, maxOf(floorNow, prefs.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)))
             .putInt(
