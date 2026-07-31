@@ -486,6 +486,25 @@ class WhoopConnectionService : Service() {
     }
 
     /**
+     * The key identifying "this night", stable across midnight.
+     *
+     * Anything at or after [LUCID_NIGHT_ROLLOVER_HOUR] belongs to the night that STARTS on that date;
+     * anything before it belongs to the previous evening's night. So 23:30 and 02:00 share a key, and the
+     * key only changes in the late morning when nobody is being cued.
+     */
+    private fun lucidNightKeyFor(nowMs: Long): String {
+        val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
+        if (cal.get(java.util.Calendar.HOUR_OF_DAY) < LUCID_NIGHT_ROLLOVER_HOUR) {
+            cal.add(java.util.Calendar.DAY_OF_MONTH, -1)
+        }
+        return "%04d-%02d-%02d".format(
+            cal.get(java.util.Calendar.YEAR),
+            cal.get(java.util.Calendar.MONTH) + 1,
+            cal.get(java.util.Calendar.DAY_OF_MONTH),
+        )
+    }
+
+    /**
      * Keep the realtime HR stream armed across the sleeping hours whenever lucid night cueing is on.
      *
      * Re-evaluated on a slow timer so it picks up the window opening/closing and the user toggling the
@@ -665,9 +684,15 @@ class WhoopConnectionService : Service() {
         if (!LucidPrefs.nightEnabled(this)) return
 
         val prefs = LucidPrefs.of(this)
-        val todayKey = java.time.LocalDate.now().toString()
+        // The night key is the date of the EVENING the night started, so it does not change at midnight.
+        //
+        // Using LocalDate.now() rolled the key over at 00:00 — in the middle of the night it was meant to
+        // be tracking. That reset the cue budget, cleared the HR window, dropped the REM-period state and
+        // restarted the sleep-onset clock, so `minutesAsleep` began again from zero at midnight and the
+        // cycle prior suppressed REM confidence through the small hours — exactly when REM is longest.
+        val todayKey = lucidNightKeyFor(now)
 
-        // A new local date starts a fresh night: counters reset, template reloaded, runner cleared.
+        // A new night starts fresh: counters reset, template reloaded, runner cleared.
         if (lucidNightKey != todayKey) {
             lucidNightKey = todayKey
             lucidRunner.reset()
@@ -772,7 +797,11 @@ class WhoopConnectionService : Service() {
     private suspend fun buildLucidTemplate(): LiveRemEstimator.RemTemplate? {
         val nowS = System.currentTimeMillis() / 1000L
         val fromS = nowS - LUCID_TEMPLATE_LOOKBACK_DAYS * 86_400L
-        val sessions = repo.sleepSessionsMerged("my-whoop", fromS, nowS, limit = 200)
+        // The ACTIVE strap id, not a hardcoded "my-whoop". A strap paired through the wizard registers
+        // as "whoop-<mac>", so the literal read the wrong device entirely — and since a missing template
+        // is a silent stand-down, that alone made the night half incapable of ever firing.
+        val strapId = (application as NoopApplication).activeDeviceId
+        val sessions = repo.sleepSessionsMerged(strapId, fromS, nowS, limit = 200)
             .filter { !it.stagesJSON.isNullOrBlank() }
             .takeLast(LUCID_TEMPLATE_MAX_NIGHTS)
         if (sessions.isEmpty()) return null
@@ -780,7 +809,9 @@ class WhoopConnectionService : Service() {
         val samples = ArrayList<LiveRemEstimator.NightSample>(sessions.size)
         for (session in sessions) {
             val segments = com.noop.ui.parsePersistedSegments(session.stagesJSON) ?: continue
-            val hr = repo.hrSamples("my-whoop", session.startTs, session.endTs, limit = 20_000)
+            // Union read: live-BLE and offloaded rows can sit under sibling source ids, and a raw
+            // single-id query silently returned none of them.
+            val hr = repo.hrSamplesUnion(strapId, session.startTs, session.endTs, limit = 20_000)
             if (hr.isEmpty()) continue
 
             val rem = ArrayList<Double>()
@@ -832,6 +863,10 @@ class WhoopConnectionService : Service() {
         /** How often the lucid capture loop re-evaluates. Slow on purpose — it only has to notice the
          *  window opening/closing and the toggle changing. */
         private const val LUCID_CAPTURE_TICK_MS = 5 * 60_000L
+
+        /** Hour a lucid "night" rolls over to the next key. Noon — comfortably after any sleep ends and
+         *  far from the midnight boundary a night straddles. */
+        private const val LUCID_NIGHT_ROLLOVER_HOUR = 12
 
         private const val LUCID_TEMPLATE_LOOKBACK_DAYS = 30L
 
