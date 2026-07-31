@@ -489,10 +489,14 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
         ticks == 0 -> "no heart rate reached it — the live stream was never running"
         templateNights < 0 -> "no REM template yet — needs a scored night with both REM and non-REM"
         floor <= 0 -> "no sleeping floor measured — the night needs a few hours of heart rate"
-        conf < (LiveRemEstimator.CUE_THRESHOLD * 100).toInt() ->
-            "REM confidence peaked at $conf%, under the $%d%% needed".format(
-                (LiveRemEstimator.CUE_THRESHOLD * 100).toInt(),
-            )
+        conf < (LiveRemEstimator.CUE_THRESHOLD * 100).toInt() -> {
+            // Pure interpolation, NO String.format. This line mixed the two and crashed the screen:
+            // once "$conf" interpolated, the literal "%," that followed was parsed by the formatter as
+            // a specifier ("," flag, then 'u' from " under") -> UnknownFormatConversionException. Any
+            // string carrying a literal % must never be handed to format().
+            val needed = (LiveRemEstimator.CUE_THRESHOLD * 100).toInt()
+            "REM confidence peaked at $conf%, under the $needed% needed"
+        }
         hold.isNotEmpty() -> "held: ${hold.lowercase()}"
         else -> "no cue was due"
     }
