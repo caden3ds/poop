@@ -5032,9 +5032,22 @@ class WhoopBleClient(
         get() = Triple(wantsRealtime, realtimeArmed, _state.value.bonded)
 
     fun setLucidNightCapture(on: Boolean) {
-        if (lucidNightWantsRealtime == on) return
+        val changed = lucidNightWantsRealtime != on
         lucidNightWantsRealtime = on
-        log("Lucid: realtime stream ${if (on) "held open for REM estimation" else "released"}")
+        if (changed) {
+            log("Lucid: realtime stream ${if (on) "held open for REM estimation" else "released"}")
+        }
+        // RECONCILE EVERY TIME, not only when the flag changes.
+        //
+        // This used to return early on an unchanged value. That looked like a harmless no-op and was
+        // not: reconcileRealtime BAILS WITHOUT RETRYING when the strap is not reachable yet
+        // (a 5/MG that has not reached `bonded`). So one call at the start of the window that happened
+        // to land while the link was down armed nothing, every later call short-circuited before
+        // reaching reconcile, and the stream stayed off for the whole night.
+        //
+        // reconcileRealtime is itself idempotent — it returns immediately when the derived want already
+        // matches what is armed — so calling it on every tick costs nothing and turns the caller's slow
+        // timer into the retry this needs.
         reconcileRealtime()
     }
 

@@ -166,6 +166,46 @@ class LucidNightRunnerTest {
         assertTrue("the night budget must NOT clear", state.cuesTonight == 2)
     }
 
+    /**
+     * A brief dip below the threshold must NOT restart the REM period.
+     *
+     * The policy needs MIN_MINUTES_INTO_REM of CONTINUOUS REM before a cue is due. Without hysteresis a
+     * single noisy tick reset that clock, so on a real signal the period could be restarted indefinitely
+     * and no cue would ever become due — silent for a reason no diagnostic would have named.
+     */
+    @Test
+    fun `a brief dip out of REM does not restart the period`() {
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+
+        // Establish REM, then inject ONE deep-looking minute partway in, then continue in REM.
+        var fired = listOf<Pair<Int, LucidCuePolicy.CueStrength>>()
+        var m = 0
+        val collected = ArrayList<Pair<Int, LucidCuePolicy.CueStrength>>()
+        while (m < 30) {
+            val hr = if (m == 14) deepPattern[0] else remPattern[m % remPattern.size]
+            val tick = runner.onHeartRate(
+                hr = hr, nowMs = m * minute, floorBpm = 51,
+                template = template, minutesAsleep = 120 + m, state = state, enabled = true,
+            )
+            state = tick.nextState
+            tick.cue?.let { collected.add(m to it) }
+            m++
+        }
+        fired = collected
+        assertTrue("the dip must not prevent a cue entirely, got $fired", fired.isNotEmpty())
+    }
+
+    /** A SUSTAINED absence still ends the period and clears its budget. */
+    @Test
+    fun `a sustained exit from REM still ends the period`() {
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState(cuesThisPeriod = 2, cuesTonight = 2)
+        // Well beyond the grace window.
+        run(runner, deepPattern, 0, 20, { state }, { state = it })
+        assertTrue("a real exit must clear the per-period budget", state.cuesThisPeriod == 0)
+    }
+
     @Test
     fun `never cues without a template`() {
         val runner = LucidNightRunner()

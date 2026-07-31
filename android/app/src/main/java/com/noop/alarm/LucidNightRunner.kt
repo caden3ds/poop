@@ -21,10 +21,35 @@ import com.noop.analytics.LucidCuePolicy
  * belongs to [LiveRemEstimator]. This class does neither, on purpose.
  */
 class LucidNightRunner(
-    /** How many live HR samples to retain for the feature window. */
-    private val windowSize: Int = 40,
+    /**
+     * Feature window LENGTH IN MINUTES, not in samples.
+     *
+     * It was a flat 40-sample cap. The strap streams at roughly 1 Hz, so that was a ~40 SECOND window
+     * while [LiveRemEstimator] documents and expects "roughly the last [LiveRemEstimator.LIVE_WINDOW_MIN]
+     * minutes". Short-window variability is the feature that actually separates REM from light sleep, so
+     * measuring it over 40 s instead of 5 min made the estimate far noisier than designed — and a noisy
+     * estimate flickers across the threshold, which the REM-period tracking below then punishes.
+     *
+     * Time-based, so it self-adjusts if the sample rate changes instead of silently meaning something
+     * different.
+     */
+    private val windowMinutes: Int = LiveRemEstimator.LIVE_WINDOW_MIN,
+    /** Hard cap on retained samples, so an unexpectedly fast stream cannot grow this without bound. */
+    private val maxSamples: Int = 600,
+    /**
+     * How long the estimate must stay OUT of REM before the period is declared over.
+     *
+     * Without this a single dipping tick reset the period clock, and the policy needs
+     * [LucidCuePolicy.MIN_MINUTES_INTO_REM] of CONTINUOUS REM before it will cue — so on a real
+     * (noisy) signal the period could be restarted forever and no cue would ever become due.
+     */
+    private val remExitGraceMs: Long = 90_000L,
 ) {
-    private val recentHr = ArrayDeque<Double>()
+    /** (timestampMs, bpm), pruned by age rather than count. */
+    private val recentHr = ArrayDeque<Pair<Long, Double>>()
+
+    /** When the estimate last read REM; drives [remExitGraceMs]. */
+    private var lastInRemMs: Long? = null
 
     /** When the current continuous REM stretch began (ms), or null when not currently in REM. */
     private var remPeriodStartMs: Long? = null
@@ -84,8 +109,16 @@ class LucidNightRunner(
         if (hr <= 0) {
             return Tick(null, state, arousalStoodDown = false, holdReason = "No heart rate", remConfidence = null)
         }
-        recentHr.addLast(hr.toDouble())
-        while (recentHr.size > windowSize) recentHr.removeFirst()
+        recentHr.addLast(nowMs to hr.toDouble())
+        // Prune by AGE, but never below the estimator's minimum. On a sparse stream (readings a minute
+        // apart rather than a second) a strict 5-minute cut leaves fewer samples than the estimator will
+        // accept, and it would refuse forever — trading a slightly staler window for an answer at all is
+        // the better failure mode, and the estimator still applies its own floor on top.
+        val cutoff = nowMs - windowMinutes * 60_000L
+        while (recentHr.size > LiveRemEstimator.MIN_LIVE_SAMPLES && recentHr.first().first < cutoff) {
+            recentHr.removeFirst()
+        }
+        while (recentHr.size > maxSamples) recentHr.removeFirst()
 
         // ── Arousal watch. Runs FIRST and unconditionally: if the sleeper is surfacing after the last
         // cue, that outranks anything the estimator has to say this tick.
@@ -110,7 +143,7 @@ class LucidNightRunner(
         }
 
         val estimate = LiveRemEstimator.estimate(
-            recentHr = recentHr.toList(),
+            recentHr = recentHr.map { it.second },
             floorBpm = floorBpm?.toDouble(),
             template = template,
             minutesAsleep = minutesAsleep,
@@ -127,11 +160,20 @@ class LucidNightRunner(
         // `remPeriodStartMs` starts null, so there is no edge to detect, and a restored "period budget
         // spent" would have blocked every remaining cue for the rest of the night.
         if (inRem) {
+            lastInRemMs = nowMs
             if (remPeriodStartMs == null) remPeriodStartMs = nowMs
         } else {
-            remPeriodStartMs = null
-            if (working.cuesThisPeriod != 0 || working.arousalAbortedPeriod) {
-                working = working.copy(cuesThisPeriod = 0, arousalAbortedPeriod = false)
+            // End the period only after a SUSTAINED absence. A brief dip below the threshold is the
+            // signal being noisy, not REM ending, and treating it as the latter restarts the clock the
+            // policy is counting on.
+            val since = lastInRemMs
+            val sustainedExit = since == null || nowMs - since >= remExitGraceMs
+            if (sustainedExit) {
+                remPeriodStartMs = null
+                lastInRemMs = null
+                if (working.cuesThisPeriod != 0 || working.arousalAbortedPeriod) {
+                    working = working.copy(cuesThisPeriod = 0, arousalAbortedPeriod = false)
+                }
             }
         }
 
@@ -157,7 +199,8 @@ class LucidNightRunner(
         return when (decision) {
             is LucidCuePolicy.Decision.Cue -> {
                 // Snapshot the pre-cue HR mean as the arousal baseline BEFORE the buzz lands.
-                arousalBaseline = if (recentHr.isEmpty()) null else recentHr.sum() / recentHr.size
+                arousalBaseline = if (recentHr.isEmpty()) null
+                          else recentHr.sumOf { it.second } / recentHr.size
                 lastCueAtMs = nowMs
                 lastCueFiredAtMs = nowMs
                 postCueHr.clear()
@@ -188,6 +231,7 @@ class LucidNightRunner(
     fun reset() {
         recentHr.clear()
         remPeriodStartMs = null
+        lastInRemMs = null
         arousalBaseline = null
         lastCueAtMs = null
         lastCueFiredAtMs = null
