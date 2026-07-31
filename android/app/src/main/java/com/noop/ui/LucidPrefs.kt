@@ -73,6 +73,14 @@ object LucidPrefs {
     /** Cues actually fired. */
     const val LAST_NIGHT_CUES = "lucid.lastNight.cues"
 
+    /** Ticks where the app WANTED the realtime stream. */
+    const val LAST_NIGHT_STREAM_WANTED = "lucid.lastNight.streamWanted"
+    /** Ticks where the stream was actually ARMED on the strap. A large gap between this and
+     *  [LAST_NIGHT_STREAM_WANTED] means the arming was refused, not that nothing asked. */
+    const val LAST_NIGHT_STREAM_ARMED = "lucid.lastNight.streamArmed"
+    /** Whether the link ever reached "bonded" — the gate the arming refuses on. */
+    const val LAST_NIGHT_BONDED = "lucid.lastNight.bonded"
+
     const val DEFAULT_DAY_CUES_PER_DAY = 4
     const val DEFAULT_DAY_START_MIN = 10 * 60   // 10:00
     const val DEFAULT_DAY_END_MIN = 21 * 60     // 21:00

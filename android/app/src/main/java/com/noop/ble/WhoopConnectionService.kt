@@ -753,6 +753,7 @@ class WhoopConnectionService : Service() {
         // Persist the counters AND how far down the chain this tick got. Written every tick (cheap,
         // SharedPreferences batches to disk) so the morning summary reflects the whole night, not just
         // its last moment.
+        val (rtWanted, rtArmed, rtBonded) = ble.realtimeStatus
         val floorNow = nightTrough.troughBpm(now) ?: 0
         val confPct = ((tick.remConfidence ?: 0.0) * 100).toInt()
         prefs.edit()
@@ -780,6 +781,18 @@ class WhoopConnectionService : Service() {
                 maxOf(confPct, prefs.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)),
             )
             .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, tick.holdReason ?: "")
+            .putInt(
+                LucidPrefs.LAST_NIGHT_STREAM_WANTED,
+                prefs.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0) + if (rtWanted) 1 else 0,
+            )
+            .putInt(
+                LucidPrefs.LAST_NIGHT_STREAM_ARMED,
+                prefs.getInt(LucidPrefs.LAST_NIGHT_STREAM_ARMED, 0) + if (rtArmed) 1 else 0,
+            )
+            .putBoolean(
+                LucidPrefs.LAST_NIGHT_BONDED,
+                rtBonded || prefs.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false),
+            )
             .putInt(LucidPrefs.LAST_NIGHT_CUES, tick.nextState.cuesTonight)
             .apply()
 

@@ -5019,6 +5019,18 @@ class WhoopBleClient(
      * This DOES cost battery: an overnight realtime stream is one of the larger drains, which is why the
      * caller windows it to the sleeping hours rather than holding it all day.
      */
+    /**
+     * Whether the realtime stream is CURRENTLY armed on the strap, and whether the app considers the
+     * link established enough to arm it.
+     *
+     * Exposed for the lucid diagnostic. [reconcileRealtime] refuses to send the toggle to a non-WHOOP4
+     * strap until `bonded` is true, and on a 5/MG `bonded` is only set once live HR is already
+     * arriving — so "wanted but never armed" is a state the feature can sit in all night, and it is
+     * invisible without reading both flags.
+     */
+    val realtimeStatus: Triple<Boolean, Boolean, Boolean>
+        get() = Triple(wantsRealtime, realtimeArmed, _state.value.bonded)
+
     fun setLucidNightCapture(on: Boolean) {
         if (lucidNightWantsRealtime == on) return
         lucidNightWantsRealtime = on

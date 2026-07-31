@@ -393,7 +393,21 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
     val hold = p.getString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "").orEmpty()
 
     if (cues > 0) return "$night: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
+    val wanted = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0)
+    val armed = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_ARMED, 0)
+    val bonded = p.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false)
+
     val why = when {
+        // Distinguish "nothing asked for the stream" from "the strap refused to arm it". On a 5/MG the
+        // arming is gated on the link being 'bonded', and 'bonded' is only set once live heart rate is
+        // already arriving — so a night can sit wanting the stream and never getting it.
+        ticks == 0 && wanted > 0 && armed == 0 && !bonded ->
+            "the stream was requested $wanted times but never armed — the strap never reached the " +
+                "'bonded' state the arming waits on"
+        ticks == 0 && wanted > 0 && armed == 0 ->
+            "the stream was requested $wanted times but never armed"
+        ticks == 0 && wanted == 0 ->
+            "nothing asked for the live stream — the capture window may not have covered your night"
         ticks == 0 -> "no heart rate reached it — the live stream was never running"
         templateNights < 0 -> "no REM template yet — needs a scored night with both REM and non-REM"
         floor <= 0 -> "no sleeping floor measured — the night needs a few hours of heart rate"
