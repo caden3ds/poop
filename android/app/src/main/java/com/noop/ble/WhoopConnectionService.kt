@@ -705,8 +705,8 @@ class WhoopConnectionService : Service() {
                     .putInt(LucidPrefs.CUES_THIS_PERIOD, 0)
                     .putLong(LucidPrefs.LAST_CUE_AT, 0L)
                     .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, false)
-                    // Fresh diagnostic for the new night.
-                    .putString(LucidPrefs.LAST_NIGHT_KEY, todayKey)
+                    // Fresh diagnostic for the new night. (LAST_NIGHT_KEY itself is written on every
+                    // tick below — see there for why.)
                     .putInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0)
                     .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, -1)
                     .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)
@@ -756,6 +756,14 @@ class WhoopConnectionService : Service() {
         val floorNow = nightTrough.troughBpm(now) ?: 0
         val confPct = ((tick.remConfidence ?: 0.0) * 100).toInt()
         prefs.edit()
+            // Written EVERY tick, not just when the night counters reset.
+            //
+            // It lived in that reset branch, which is skipped whenever the persisted NIGHT_KEY already
+            // matches — e.g. the service restarting mid-night, or an app update landing on a night the
+            // key was already set for. The figures below were then written with no key beside them, and
+            // the morning summary (which keys off exactly this) reported "nothing recorded" over a night
+            // full of real data. Writing it here makes the key and the data it labels inseparable.
+            .putString(LucidPrefs.LAST_NIGHT_KEY, todayKey)
             .putInt(LucidPrefs.CUES_THIS_PERIOD, tick.nextState.cuesThisPeriod)
             .putInt(LucidPrefs.CUES_TONIGHT, tick.nextState.cuesTonight)
             .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, tick.nextState.arousalAbortedPeriod)
