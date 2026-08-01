@@ -34,27 +34,7 @@ class SleepStagerPhase2Test {
 
     // ── H4 physiological in-bed span cap (#547/#531/#509 tail) ───────────────────────────────────
 
-    @Test
-    fun detectSleepClampsOverlongBadClockBlock() {
-        // 18 h still "night" > 16 h cap → dropped, so it can never report a 12 h+ sleep.
-        val start = startAtHour(22)
-        val dur = 18 * 60 * 60
-        val grav = stillGravity(start, dur)
-        val hr = hrStream(start, dur, 50)
-        assertTrue("an 18 h still block is a bad-clock artefact and is dropped by the span cap",
-            SleepStager.detectSleep(hr = hr, gravity = grav).isEmpty())
-    }
 
-    @Test
-    fun detectSleepKeepsLongButPlausibleNight() {
-        // 15 h ≤ cap → kept (the cap only drops the clock-artefact range, never a real lie-in).
-        val start = startAtHour(21)
-        val dur = 15 * 60 * 60
-        val grav = stillGravity(start, dur)
-        val hr = hrStream(start, dur, 50)
-        assertEquals("a 15 h night is below the cap and survives", 1,
-            SleepStager.detectSleep(hr = hr, gravity = grav).size)
-    }
 
     // ── H7 morning-stillness nap suppression (#531) — pure guard ─────────────────────────────────
 

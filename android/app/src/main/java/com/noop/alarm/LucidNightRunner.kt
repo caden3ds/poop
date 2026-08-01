@@ -151,6 +151,12 @@ class LucidNightRunner(
 
         val inRem = (estimate as? LiveRemEstimator.Estimate.Read)?.inRem == true
         val confidence = (estimate as? LiveRemEstimator.Estimate.Read)?.confidence
+        // Why the estimator could not answer, when it could not. This must not be thrown away: an
+        // Unavailable estimate yields inRem=false exactly like a low-confidence Read does, so the policy
+        // reports the generic "Not in REM" for both and the actual cause — no floor, no template, a thin
+        // stream — never reaches the log. Nights were spent reading "Not in REM" for what was really
+        // "the estimator never ran".
+        val unavailableReason = (estimate as? LiveRemEstimator.Estimate.Unavailable)?.reason
 
         // ── REM period tracking. Being OUT of REM clears the per-period budget and the arousal latch
         // (both are scoped to a period, not to the night — the night budget is separate and persists).
@@ -217,11 +223,17 @@ class LucidNightRunner(
                 )
             }
 
+            // The estimator's own reason outranks "Not in REM" — see [unavailableReason]. Every other
+            // hold (budget spent, too soon, stood down) is a real policy decision and keeps its wording.
             is LucidCuePolicy.Decision.Hold -> Tick(
                 cue = null,
                 nextState = working,
                 arousalStoodDown = false,
-                holdReason = decision.reason,
+                holdReason = if (decision.reason == "Not in REM" && unavailableReason != null) {
+                    unavailableReason
+                } else {
+                    decision.reason
+                },
                 remConfidence = confidence,
             )
         }

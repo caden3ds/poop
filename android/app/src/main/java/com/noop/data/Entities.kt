@@ -23,7 +23,6 @@ import androidx.room.Index
  *   - dailyMetric     PK (deviceId, day)
  *   - sleepSession    PK (deviceId, startTs)
  *   - device          PK (id)
- *   - journal         PK (deviceId, day, question)
  *   - workout         PK (deviceId, startTs, sport)
  *   - appleDaily      PK (deviceId, day)
  *
@@ -380,28 +379,6 @@ data class LabMarkerRow(
     val source: String,
     val note: String? = null,
     val referenceText: String? = null, // user-entered range, shown verbatim; NOOP ships none
-)
-
-/**
- * Cached journal answer (logged behaviour). Swift `journal` (v8, JournalWorkoutAppleCache.swift).
- * Natural key (deviceId, day, question) where day is "YYYY-MM-DD". `answeredYes` is stored as an
- * INTEGER 0/1 in SQLite; exposed as Boolean here (Room maps Boolean -> INTEGER), matching the
- * Swift `answeredYes ? 1 : 0` write and `(... as Int) != 0` read.
- */
-@Entity(tableName = "journal", primaryKeys = ["deviceId", "day", "question"])
-data class JournalEntry(
-    val deviceId: String,
-    val day: String,
-    val question: String,
-    val answeredYes: Boolean,
-    val notes: String? = null,
-    /**
-     * Optional numeric reading for a numeric journal item (e.g. caffeine mg, alcohol units), #322.
-     * null for a plain yes/no answer and for every imported WHOOP row. A numeric log writes
-     * answeredYes=true AND numericValue=v, so the EffectRanker with/without split is unchanged.
-     * Swift twin: JournalEntry.numericValue (v20). Room maps `Double?` -> nullable REAL.
-     */
-    val numericValue: Double? = null,
 )
 
 /**

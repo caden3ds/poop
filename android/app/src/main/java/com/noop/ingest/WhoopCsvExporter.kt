@@ -3,7 +3,6 @@ package com.noop.ingest
 import android.content.Context
 import android.net.Uri
 import com.noop.data.DailyMetric
-import com.noop.data.JournalEntry
 import com.noop.data.MetricSeriesRow
 import com.noop.data.SleepSession
 import com.noop.data.WhoopRepository
@@ -267,23 +266,6 @@ object WhoopCsvExporter {
         return sb.toString()
     }
 
-    /** journal_entries.csv. The importer reads the answer as a yes/no parse where "true" → true,
-     *  so the answer column MUST be the literal "true"/"false" — never prettify it to Yes/No. */
-    internal fun journalCsv(rows: List<JournalEntry>): String {
-        val sb = StringBuilder()
-        sb.append("Cycle start time,Cycle timezone,Question text,Answered yes/no,Notes\r\n")
-        for (e in rows.sortedWith(compareBy({ it.day }, { it.question }))) {
-            sb.append(
-                listOf(
-                    e.day + " 00:00:00", "UTC+00:00", csvField(e.question),
-                    if (e.answeredYes) "true" else "false",
-                    csvField(e.notes),
-                ).joinToString(","),
-            ).append("\r\n")
-        }
-        return sb.toString()
-    }
-
     /** Full-fidelity metricSeries dump ({deviceId, day, key, value}). Sidecar only — the importers
      *  deliberately ignore it (they read only the four CSVs). Sorted for a stable, diffable file. */
     internal fun metricSeriesJson(rows: List<MetricSeriesRow>): String {
@@ -321,7 +303,7 @@ object WhoopCsvExporter {
      *
      * [deviceId] is the registry's ACTIVE strap id (SPINE / #814) and has NO default on purpose
      * (#458): the old `= "my-whoop"` default meant a live-BLE install — whose engine banks computed
-     * scores under `"<strapId>-noop"` — exported `0 days, 0 sleeps, 0 journal entries` while the app
+     * scores under `"<strapId>-noop"` — exported `0 days, 0 sleeps, 0 workouts` while the app
      * displayed months of history. It survived the #359 sweep because that grep targeted the
      * hardcoded `"my-whoop-noop"` string, not default parameters. Every read below goes through the
      * active∪canonical union resolvers ([WhoopRepository.importedSourceIds] /
@@ -366,14 +348,6 @@ object WhoopCsvExporter {
         val seenWorkouts = HashSet<String>()
         val workouts = (repo.workoutsUnion(deviceId, 0L, hi) + repo.detectedWorkoutsUnion(deviceId, 0L, hi))
             .filter { seenWorkouts.add("${it.startTs}|${it.sport}") }
-        // Journal lives under the imported ids. Native in-app journal logging (a separate feature on
-        // its own device id) isn't read here, keeping the exporter self-contained; the imported
-        // journal is the WHOOP-sourced history the round-trip targets. Dedup by the row's natural key
-        // (day, question), active-first.
-        val seenJournal = HashSet<String>()
-        val journal = importedIds.flatMap { repo.journal(it, "0000-01-01", "9999-12-31") }
-            .filter { seenJournal.add("${it.day}|${it.question}") }
-
         // Cycles columns recovered from the imported metricSeries: per (day, key) the FIRST union id
         // that has a value wins (active strap first), mirroring the read-side precedence.
         val seriesByDay = HashMap<String, MutableMap<String, Double>>()
@@ -414,13 +388,11 @@ object WhoopCsvExporter {
                     if (s.deviceId.endsWith("-noop")) "noop (APPROXIMATE)" else "import"
                 }.toByteArray(),
                 "workouts.csv" to workoutsCsv(workouts, ::workoutSource).toByteArray(),
-                "journal_entries.csv" to journalCsv(journal).toByteArray(),
                 "noop_metric_series.json" to metricSeriesJson(sidecarRows).toByteArray(),
             ),
         )
         context.contentResolver.openOutputStream(uri)?.use { it.write(zip); it.flush() }
             ?: throw IOException("Could not open the chosen file for writing.")
-        return "Exported ${daily.size} days, ${sleeps.size} sleeps, ${workouts.size} workouts, " +
-            "${journal.size} journal entries."
+        return "Exported ${daily.size} days, ${sleeps.size} sleeps, ${workouts.size} workouts."
     }
 }

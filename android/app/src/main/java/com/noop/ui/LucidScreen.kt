@@ -469,6 +469,9 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
     val conf = p.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)
     val cues = p.getInt(LucidPrefs.LAST_NIGHT_CUES, 0)
     val hold = p.getString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "").orEmpty()
+    val bedtimeMs = p.getLong(LucidPrefs.LAST_NIGHT_BEDTIME_MS, 0L)
+    val estimates = p.getInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0)
+    val noHr = p.getInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0)
 
     if (cues > 0) return "$night: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
     val wanted = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0)
@@ -476,6 +479,12 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
     val bonded = p.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false)
 
     val why = when {
+        // The night clock is the bedtime you mark on the Sleep tab, so an unmarked night runs nothing at
+        // all. That is a deliberate tradeoff, and it looks identical to a broken strap from here — every
+        // other "nothing happened" reason also lands on zero ticks — so it has to be named first.
+        bedtimeMs <= 0L ->
+            "no bedtime was marked — tap “Going to sleep” on the Sleep tab before bed " +
+                "and the night runs from there"
         // Distinguish "nothing asked for the stream" from "the strap refused to arm it". On a 5/MG the
         // arming is gated on the link being 'bonded', and 'bonded' is only set once live heart rate is
         // already arriving — so a night can sit wanting the stream and never getting it.
@@ -487,8 +496,23 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
         ticks == 0 && wanted == 0 ->
             "nothing asked for the live stream — the capture window may not have covered your night"
         ticks == 0 -> "no heart rate reached it — the live stream was never running"
-        templateNights < 0 -> "no REM template yet — needs a scored night with both REM and non-REM"
-        floor <= 0 -> "no sleeping floor measured — the night needs a few hours of heart rate"
+        // These three explain a night the estimator never ANSWERED on. Gate them on that, or they
+        // misreport a night that ran fine: the estimator now falls back to the template's learned floor,
+        // so LAST_NIGHT_FLOOR_BPM can sit at 0 through a night that was estimating perfectly well, and
+        // "no sleeping floor measured" would be flatly wrong.
+        estimates == 0 && templateNights < 0 ->
+            "no REM template yet — needs a scored night with both REM and non-REM"
+        estimates == 0 && floor <= 0 ->
+            "no sleeping floor, measured or learned — the night needs a few hours of heart rate"
+        estimates == 0 -> "the estimator never returned a reading"
+        // A night that ran well and then lost the strap must not be reported as merely unconfident. The
+        // confidence figure is honest about the half it saw and silent about the half it did not, so
+        // name the blackout first when it dominated the night.
+        noHr > ticks -> {
+            val needed = (LiveRemEstimator.CUE_THRESHOLD * 100).toInt()
+            "the strap stopped reporting for most of the night — peak REM confidence was $conf% " +
+                "(needs $needed%) over the part it could see"
+        }
         conf < (LiveRemEstimator.CUE_THRESHOLD * 100).toInt() -> {
             // Pure interpolation, NO String.format. This line mixed the two and crashed the screen:
             // once "$conf" interpolated, the literal "%," that followed was parsed by the formatter as

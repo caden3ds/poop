@@ -26,16 +26,16 @@ class TodayLayoutPrefsTest {
     fun encodeDecode_roundTripsAReorderedList() {
         val reordered = listOf(
             TodaySection.HEART_RATE, TodaySection.HERO, TodaySection.KEY_METRICS,
-            TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
+            TodaySection.WORKOUTS, TodaySection.RECOVERY_VITALS,
         )
         val encoded = TodayLayoutPrefs.encode(reordered)
-        assertEquals("heartRate,hero,keyMetrics,workouts,recoveryVitals,journal", encoded)
+        assertEquals("heartRate,hero,keyMetrics,workouts,recoveryVitals", encoded)
         assertEquals(reordered, TodayLayoutPrefs.decodeOrder(encoded))
     }
 
     /**
      * An order saved by an OLDER build carries sections that no longer exist ("synthesis", "yourCards",
-     * "liveSession"). They must be dropped silently, and every surviving section must still appear exactly
+     * "liveSession", "journal"). They must be dropped silently, and every surviving section must still appear exactly
      * once — the upgrade path for anyone who had customised their Today layout before the cull.
      */
     @Test
@@ -48,7 +48,7 @@ class TodayLayoutPrefsTest {
         assertEquals(
             listOf(
                 TodaySection.HERO, TodaySection.KEY_METRICS, TodaySection.WORKOUTS,
-                TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS, TodaySection.JOURNAL,
+                TodaySection.HEART_RATE, TodaySection.RECOVERY_VITALS,
             ),
             decoded,
         )
@@ -67,8 +67,6 @@ class TodayLayoutPrefsTest {
                 // before the saved heartRate, in default order among themselves:
                 TodaySection.HERO, TodaySection.WORKOUTS,
                 TodaySection.HEART_RATE, TodaySection.KEY_METRICS, TodaySection.RECOVERY_VITALS,
-                // journal follows everything saved → appended:
-                TodaySection.JOURNAL,
             ),
             decoded,
         )
@@ -106,7 +104,7 @@ class TodayLayoutPrefsTest {
         assertEquals("raw keys must be unique (they're the persisted identity)", raws.size, raws.toSet().size)
         // Pin the exact wire strings — they are the persisted layout identity.
         assertEquals(
-            listOf("hero", "keyMetrics", "workouts", "heartRate", "recoveryVitals", "journal"),
+            listOf("hero", "keyMetrics", "workouts", "heartRate", "recoveryVitals"),
             raws,
         )
     }

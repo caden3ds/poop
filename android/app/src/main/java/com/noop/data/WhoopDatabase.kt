@@ -37,7 +37,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyMetric::class,
         SleepSession::class,
         MetricSeriesRow::class,
-        JournalEntry::class,
         WorkoutRow::class,
         DismissedWorkout::class,
         DismissedSleep::class,
@@ -50,7 +49,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         PpgWaveformSampleEntity::class,
         RawImuSampleEntity::class,
     ],
-    version = 22,
+    version = 23,
     exportSchema = false,
 )
 abstract class WhoopDatabase : RoomDatabase() {
@@ -581,6 +580,20 @@ abstract class WhoopDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v22 -> v23: the journal feature was removed, so [JournalEntry] is no longer a Room entity.
+         *
+         * Deliberately a NO-OP. The `journal` table is LEFT IN PLACE rather than dropped: the rows are
+         * user-entered history, dropping them is irreversible, and Room does not validate tables it has
+         * no entity for — so an orphaned table costs a few KB and nothing else. Only the identity hash
+         * needs to move, which the version bump does on its own. (MIGRATION_13_14 still adds
+         * `journal.numericValue` on the way past; an existing migration is never rewritten, and a
+         * database upgrading from v13 must still take the same path it always did.)
+         */
+        internal val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) = Unit
+        }
+
         private fun build(appContext: Context): WhoopDatabase =
             Room.databaseBuilder(appContext, WhoopDatabase::class.java, DB_NAME)
                 // #1014: replace ONLY the corruption handling of the default open-helper. The
@@ -597,6 +610,7 @@ abstract class WhoopDatabase : RoomDatabase() {
                     MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
                     MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18,
                     MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21, MIGRATION_21_22,
+                    MIGRATION_22_23,
                 )
                 // #1037: a FRESH install builds the schema straight at the current version and runs NO
                 // migrations, so the MIGRATION_7_8 "my-whoop" registry seed never fires and the WHOOP,

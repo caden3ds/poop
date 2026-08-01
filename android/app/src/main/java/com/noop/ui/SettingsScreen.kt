@@ -504,7 +504,6 @@ fun SettingsScreen(
     var stressCheckIn by remember { mutableStateOf(BiofeedbackPrefs.checkInEnabled(context)) }
     var stressAutoNudge by remember { mutableStateOf(BiofeedbackPrefs.autoNudge(context)) }
     var autoDetectWorkouts by remember { mutableStateOf(NoopPrefs.autoDetectWorkouts(context)) }
-    var journalReminder by remember { mutableStateOf(NoopPrefs.journalReminderEnabled(context)) }
     // Keep the screen on during a manual workout recording (#703), default OFF. The live-workout
     // screen reads this same "workoutKeepScreenOn" key. String shared verbatim with the iOS/Mac twin
     // (AppStorage "workoutKeepScreenOn"). Read/written inline against the shared prefs store.
@@ -1008,45 +1007,6 @@ fun SettingsScreen(
             }
         }
 
-        // Sleep. Manual-sleep-only lives HERE rather than on the Sleep tab: it is a persistent MODE that
-        // changes how every night is scored, not an action taken while looking at a night, so it belongs
-        // with the app's other settings. The Sleep tab keeps only the two ACTIONS (mark bedtime / wake).
-        val manualSleepOnly by vm.manualSleepOnly.collectAsStateWithLifecycle()
-        SettingsSection(
-            icon = Icons.Filled.Bedtime,
-            title = "Sleep",
-            blurb = "By default POOP detects your nights automatically from the strap. You can turn that " +
-                "off and log every night yourself instead.",
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Manual sleep only", style = NoopType.subhead, color = Palette.textPrimary)
-                    Text(
-                        "Turns OFF automatic sleep detection. Your nights come only from the " +
-                            "\"Going to sleep\" and \"I'm awake\" buttons on the Sleep tab, scored from the " +
-                            "strap's recorded data over that window. Nights already logged stay.",
-                        style = NoopType.footnote,
-                        color = Palette.textTertiary,
-                    )
-                }
-                Switch(
-                    checked = manualSleepOnly,
-                    onCheckedChange = { vm.setManualSleepOnly(it) },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Palette.surfaceBase,
-                        checkedTrackColor = Palette.accent,
-                        uncheckedThumbColor = Palette.textSecondary,
-                        uncheckedTrackColor = Palette.surfaceInset,
-                        uncheckedBorderColor = Palette.hairline,
-                    ),
-                )
-            }
-        }
-
         // --- Health & wellness (v5 opt-in toggles) ---
         SettingsSection(
             icon = Icons.Filled.Science,
@@ -1098,16 +1058,6 @@ fun SettingsScreen(
                     onCheckedChange = {
                         autoDetectWorkouts = it
                         NoopPrefs.setAutoDetectWorkouts(context, it)
-                    },
-                )
-                RowDivider()
-                ToggleRow(
-                    title = uiString(R.string.l10n_journal_reminder_journal_reminder_0fdc0d9c),
-                    detail = uiString(R.string.l10n_journal_reminder_show_a_today_card_reminding_you_to_log_your_journal_8228bc77),
-                    checked = journalReminder,
-                    onCheckedChange = {
-                        journalReminder = it
-                        NoopPrefs.setJournalReminderEnabled(context, it)
                     },
                 )
                 RowDivider()
@@ -1869,7 +1819,7 @@ fun SettingsScreen(
                     icon = Icons.Filled.Info,
                     iconTint = Palette.textTertiary,
                     text = uiString(R.string.l10n_settings_screen_importing_overwrites_everything_currently_on_this_297b76ae) +
-                        "Export CSV writes a WHOOP-format zip of your days, sleeps, workouts and journal that re-imports into POOP on Android or Mac. On-device computed rows are marked APPROXIMATE in its Source column; the .noopbak backup stays the lossless restore path.",
+                        "Export CSV writes a WHOOP-format zip of your days, sleeps and workouts that re-imports into POOP on Android or Mac. On-device computed rows are marked APPROXIMATE in its Source column; the .noopbak backup stays the lossless restore path.",
                 )
             }
         }

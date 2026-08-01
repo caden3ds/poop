@@ -10,16 +10,18 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Pins manual-sleep-only mode: with it ON, [AnalyticsEngine.analyzeDay] runs NO automatic detection —
- * the day's sleep is exactly the user's own logged windows, and those must be SCORED like detected
- * nights.
+ * Pins sleep logging: [AnalyticsEngine.analyzeDay] performs NO automatic detection at all. The day's
+ * sleep is exactly the user's own logged windows, and those must be SCORED with full physiology.
  *
- * The physiology assertions below are the regression guard for a real defect: the first cut of this
- * mode suppressed detection and left the user's night to the downstream edit-fold, which restores
- * duration + stages ONLY. Resting HR and HRV are derived from the day's matched sessions, so both
- * went permanently null in manual mode — silently killing HRV, RHR and therefore Charge, and leaving
- * the dashboard showing stale imported values. A manual night must yield the same physiology an
- * auto-detected night of the same span would.
+ * Automatic detection was removed outright, so the first test here is the load-bearing one: a night
+ * that the old detector would have found — a dense, perfectly still 8-hour overnight gravity stream —
+ * must now produce NOTHING unless the user logged it. Any session appearing from that fixture means
+ * detection has come back.
+ *
+ * The physiology assertions are the regression guard for a real defect: the first cut of manual mode
+ * suppressed detection and left the user's night to the downstream edit-fold, which restores duration
+ * + stages ONLY. Resting HR and HRV are derived from the day's matched sessions, so both went
+ * permanently null — silently killing HRV, RHR and therefore Charge.
  */
 class ManualSleepOnlyTest {
 
@@ -28,8 +30,8 @@ class ManualSleepOnlyTest {
     private val day = "2026-01-02"
 
     /** A dense, perfectly still overnight gravity stream (1/min for 8 h from 22:00 UTC): constant
-     *  posture → every stillness flag trips → V1 finds one long sleep run. The minimal honest fixture
-     *  for "a night the detector WOULD find". */
+     *  posture, every stillness flag tripping — the exact shape the removed detector accepted as one
+     *  long sleep run. Kept deliberately as the fixture that proves detection is gone. */
     private fun overnightGravity(): List<GravitySample> {
         val start = windowEnd - 8 * 3600L
         return (0 until 8 * 60).map { i ->
@@ -51,36 +53,24 @@ class ManualSleepOnlyTest {
         }
 
     @Test
-    fun defaultModeDetectsTheNight() {
+    fun anUnloggedNightIsNotDetected() {
+        // A textbook detectable night with nothing logged against it must yield NOTHING. This is the
+        // whole contract: an unmarked night is simply not scored, rather than guessed at.
         val res = AnalyticsEngine.analyzeDay(
             day = day, gravity = overnightGravity(), profile = UserProfile(),
         )
         assertTrue(
-            "the fixture night must be auto-detected with the mode off (else the manual-mode tests prove nothing)",
-            res.sleepSessions.isNotEmpty(),
-        )
-    }
-
-    @Test
-    fun manualSleepOnlyIgnoresAutomaticDetection() {
-        // Same night the detector finds by default, but no user-logged window supplied → the mode must
-        // report NOTHING rather than fall back to detection. (Honest cold state: nothing logged yet.)
-        val res = AnalyticsEngine.analyzeDay(
-            day = day, gravity = overnightGravity(), profile = UserProfile(),
-            manualSleepOnly = true,
-        )
-        assertTrue(
-            "manual-sleep-only must yield ZERO auto-detected sessions",
+            "an unlogged night must produce zero sessions — automatic detection is gone",
             res.sleepSessions.isEmpty(),
         )
     }
 
     @Test
-    fun manualSleepOnlyAlsoSilencesV2Staging() {
-        // The gate must sit ABOVE the V1/V2 fork — the experimental stager cannot resurrect detection.
+    fun theV2StagerCannotResurrectDetection() {
+        // Staging happens per-session; with no session there is nothing to stage either way.
         val res = AnalyticsEngine.analyzeDay(
             day = day, gravity = overnightGravity(), profile = UserProfile(),
-            useSleepStagerV2 = true, manualSleepOnly = true,
+            useSleepStagerV2 = true,
         )
         assertTrue(res.sleepSessions.isEmpty())
     }
@@ -94,7 +84,6 @@ class ManualSleepOnlyTest {
             rr = sleepingRr(),
             gravity = overnightGravity(),
             profile = UserProfile(),
-            manualSleepOnly = true,
             manualSleepWindows = listOf(windowStart to windowEnd),
         )
         assertEquals("the user's window must become the day's session", 1, res.sleepSessions.size)

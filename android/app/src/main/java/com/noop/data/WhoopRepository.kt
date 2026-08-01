@@ -545,7 +545,6 @@ class WhoopRepository(private val dao: WhoopDao) {
         dao.sessionSleepStateJson(deviceId, sessionStart)?.let { decodeIntArray(it) }
 
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>) = dao.upsertMetricSeries(rows)
-    suspend fun upsertJournal(rows: List<JournalEntry>) = dao.upsertJournal(rows)
     suspend fun upsertWorkouts(rows: List<WorkoutRow>) = dao.upsertWorkouts(rows)
     suspend fun upsertAppleDaily(rows: List<AppleDaily>) = dao.upsertAppleDaily(rows)
 
@@ -974,20 +973,6 @@ class WhoopRepository(private val dao: WhoopDao) {
     suspend fun workoutsCount(deviceId: String, from: Long, to: Long): Int =
         dao.workoutsCount(deviceId, from, to)
 
-    /** Journal entries for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */
-    suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry> =
-        dao.journal(deviceId, from, to)
-
-    /** Delete one native journal answer by natural key (only ever called with the "noop-journal"
-     *  source id , imported rows are never touched). */
-    suspend fun deleteJournalEntry(deviceId: String, day: String, question: String) =
-        dao.deleteJournalEntry(deviceId, day, question)
-
-    /** Atomically replace a device's imported journal within a day range (#136) — the WHOOP importer
-     *  clears the span it re-writes and upserts in ONE transaction, so the wake-day re-keying leaves no
-     *  pre-fix onset-keyed duplicates and a crash mid-import can't drop the range's journal. */
-    suspend fun replaceJournalRange(deviceId: String, from: String, to: String, rows: List<JournalEntry>) =
-        dao.replaceJournalRange(deviceId, from, to, rows)
 
     /** Apple-Health daily aggregates for the inclusive day range [from, to] (YYYY-MM-DD), oldest first. */
     suspend fun appleDaily(deviceId: String, from: String, to: String): List<AppleDaily> =

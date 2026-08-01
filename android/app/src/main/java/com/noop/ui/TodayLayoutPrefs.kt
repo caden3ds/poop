@@ -27,16 +27,15 @@ enum class TodaySection(val raw: String, val title: String) {
     KEY_METRICS("keyMetrics", "Key Metrics"),
     WORKOUTS("workouts", "Workouts"),
     HEART_RATE("heartRate", "Heart Rate"),
-    RECOVERY_VITALS("recoveryVitals", "Recovery Vitals"),
-    JOURNAL("journal", "Journal");
+    RECOVERY_VITALS("recoveryVitals", "Recovery Vitals");
 
     companion object {
         fun fromRaw(raw: String?): TodaySection? = entries.firstOrNull { it.raw == raw }
 
-        /** The original, hard-coded section order — the default when the layout isn't customised. The
-         *  journal widget is last by default. */
+        /** The original, hard-coded section order — the default when the layout isn't customised. A
+         *  saved order from before a section was removed still decodes: unknown tokens are ignored. */
         val defaultOrder: List<TodaySection> = listOf(
-            HERO, KEY_METRICS, WORKOUTS, HEART_RATE, RECOVERY_VITALS, JOURNAL,
+            HERO, KEY_METRICS, WORKOUTS, HEART_RATE, RECOVERY_VITALS,
         )
     }
 }

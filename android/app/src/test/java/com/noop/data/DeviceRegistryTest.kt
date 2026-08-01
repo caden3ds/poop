@@ -90,7 +90,6 @@ class DeviceRegistryTest {
         override suspend fun deleteBatteryFor(deviceId: String) { deletedTables += "battery" to deviceId }
         override suspend fun deleteDailyMetricsFor(deviceId: String) { deletedTables += "dailyMetric" to deviceId }
         override suspend fun deleteSleepSessionsFor(deviceId: String) { deletedTables += "sleepSession" to deviceId }
-        override suspend fun deleteJournalFor(deviceId: String) { deletedTables += "journal" to deviceId }
         override suspend fun deleteWorkoutsFor(deviceId: String) { deletedTables += "workout" to deviceId }
         override suspend fun deleteAppleDailyFor(deviceId: String) { deletedTables += "appleDaily" to deviceId }
         override suspend fun deleteMetricSeriesFor(deviceId: String) { deletedTables += "metricSeries" to deviceId }
@@ -128,7 +127,6 @@ class DeviceRegistryTest {
         override suspend fun reKeyBattery(from: String, to: String) {}
         override suspend fun reKeyDailyMetrics(from: String, to: String) {}
         override suspend fun reKeySleepSessions(from: String, to: String) {}
-        override suspend fun reKeyJournal(from: String, to: String) {}
         override suspend fun reKeyWorkouts(from: String, to: String) {}
         override suspend fun reKeyAppleDaily(from: String, to: String) {}
         override suspend fun reKeyMetricSeries(from: String, to: String) {}
@@ -273,7 +271,7 @@ class DeviceRegistryTest {
         val expectedTables = setOf(
             "hrSample", "rrInterval", "spo2Sample", "skinTempSample", "respSample", "gravitySample",
             "stepSample", "ppgHrSample", "ppgWaveformSample", "rawImuSample", "event", "battery", "dailyMetric", "sleepSession",
-            "journal", "workout", "appleDaily", "metricSeries", "dayOwnership",
+            "workout", "appleDaily", "metricSeries", "dayOwnership",
             "sleepStateSample", "labMarker", "liveSession", "dismissedWorkout", "dismissedSleep",
         )
         assertEquals(expectedTables, dao.deletedTables.map { it.first }.toSet())

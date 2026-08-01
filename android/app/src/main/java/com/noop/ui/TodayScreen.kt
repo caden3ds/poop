@@ -250,9 +250,6 @@ fun TodayScreen(
     // The liquid header battery ring taps through to Devices (iOS parity: the battery ring → router.openDevices()).
     // Defaulted to fall back to Settings so the call site stays compiling; AppRoot binds it to the Devices route.
     onOpenDevices: () -> Unit = onOpenSettings,
-    // The #627 journal-reminder card links straight to the journal (Insights). Defaulted to a no-op so
-    // the call site stays compiling; AppRoot binds it to nav.navigateTopLevel(Insights), same as Sleep.
-    onOpenJournal: () -> Unit = {},
 ) {
     val today by viewModel.today.collectAsStateWithLifecycle()
     val alert by viewModel.healthAlert.collectAsStateWithLifecycle()
@@ -565,10 +562,6 @@ fun TodayScreen(
     }
     val liveSessionsEnabled = remember { LiveSessionPrefs.enabled(context) }
     val activeLiveSession by LiveSessionRunner.active.collectAsStateWithLifecycle()
-    // The journal widget's own opt-out (default ON). Read here too so its reorderable section emits no
-    // item when disabled — an always-present zero-height slot would leave a blank draggable gap. Same
-    // remember-once idiom the card uses; a resume/recompose re-reads it. (#656)
-    val journalReminderOn = remember { NoopPrefs.journalReminderEnabled(context) }
     // S4: the Synthesis card collapses to a one-liner that expands on tap (default collapsed). Mirrors iOS.
     var synthesisExpanded by remember { mutableStateOf(false) }
     // S5: the Key Metrics grid caps at the first METRICS_COLLAPSED_CAP tiles behind a "Show all metrics"
@@ -1152,12 +1145,6 @@ fun TodayScreen(
             // gap around its slot — visible on the DEFAULT layout, where Start session sits right under
             // the hero and the beta flag is off for most users. The section keeps its place in the saved
             // order; its item simply reappears when eligible.
-            val sectionVisible = when (section) {
-                TodaySection.JOURNAL ->
-                    selectedDayOffset == 0 && journalReminderOn
-                else -> true
-            }
-            if (!sectionVisible) return@forEach
             item(key = TODAY_SECTION_KEY_PREFIX + section.raw) {
                 TodayReorderableSection(
                     section = section,
@@ -1294,12 +1281,6 @@ fun TodayScreen(
                         TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
                             HeroMetricRows(day = displayMetric, carriedDay = lastScoredRecoveryDay, vitalsDay = lastVitalsDay)
                         }
-                        // YOUR CARDS, the user-customisable dashboard (WHOOP "My Dashboard"). Hydration is
-                        TodaySection.JOURNAL -> JournalReminderCard(
-                            viewModel = viewModel,
-                            days = days,
-                            onOpenJournal = onOpenJournal,
-                        )
                     }
                 }
             }

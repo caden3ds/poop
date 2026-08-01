@@ -220,11 +220,6 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night mean (the
         // historical default) when false. The Context-aware caller reads UnitPrefs.hrvWindow and passes it.
         deepHrvWindow: Boolean = false,
-        // Manual-sleep-only mode: automatic sleep detection is disabled — analyzeDay skips detectSleep and
-        // the day's sleep comes exclusively from user-logged (userEdited) sessions via the existing
-        // sleepEditedDaily fold. The Context-aware caller reads NoopPrefs.manualSleepOnly. Default false
-        // keeps every existing caller/test byte-identical.
-        manualSleepOnly: Boolean = false,
     ): List<Computed> = withContext(Dispatchers.Default) {
         // Serialise the whole pass so overlapping callers never run two rescores in parallel (see
         // [analyzeGate]). The heavy scoring already ran off the caller's thread via withContext above; the
@@ -233,7 +228,7 @@ object IntelligenceEngine {
             val (out, healed) = analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, manualSleepOnly)
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow)
             if (healed == 0) out
             // #899 heal re-pass: the pass above deleted overlapping duplicate sleep sessions AFTER its days
             // were scored, and the read-side dedup those days consumed had no bank-recency witness (the fresh
@@ -243,7 +238,7 @@ object IntelligenceEngine {
             else analyzeRecentOnCpu(repo, profile, maxDays, importedDeviceId, maxHROverride,
                 nowSeconds, ownerSource, manualStepCoefficient, persistStepsCalibration, baselineEpoch,
                 recoveryEpoch, diag, useExperimentalSleepV2, useMotionAwareWake, sleepTraceSink, recoveryTraceSink,
-                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow, manualSleepOnly).first
+                stepsTraceSink, universalSink, workoutsTraceSink, hrvTraceSink, deepHrvWindow).first
         }
     }
 
@@ -333,9 +328,6 @@ object IntelligenceEngine {
         // #141: nightly HRV over DEEP-sleep windows only (WHOOP-style) when true; whole-night default when
         // false. Threaded into analyzeDay per scored night.
         deepHrvWindow: Boolean = false,
-        // Manual-sleep-only mode — threaded into analyzeDay so automatic detection is skipped per day.
-        // See the public overload's doc. Default false.
-        manualSleepOnly: Boolean = false,
         // #899 heal re-pass: the second component of the return is how many overlapping duplicate sleep
         // sessions the heal below deleted this pass. The public wrapper re-runs ONCE when it is non-zero
         // so the affected days re-score against the cleaned store.
@@ -555,14 +547,12 @@ object IntelligenceEngine {
                 bandSleepState = bandSleepStateSamples(repo, computedId, from, to)
             }
 
-            // Manual-sleep-only: the user's OWN logged nights are the day's sleep. Read the userEdited
-            // rows under the computed source (what the Sleep screen's bedtime/wake marks write via
-            // addManualNap) that END on this day — the same end-day attribution analyzeDay's `matched`
-            // filter uses — and hand them to analyzeDay to be SCORED like detected nights. Without this
-            // the mode produced no sessions at all, so restingHr/avgHrv (and Charge) went null: the
-            // later edit-fold restores duration + stages only. Read only when the mode is on, so the
-            // default path costs nothing.
-            val manualWindows: List<Pair<Long, Long>> = if (!manualSleepOnly) emptyList() else
+            // The user's OWN logged nights are the day's sleep. Read the userEdited rows under the
+            // computed source (what the Sleep screen's bedtime/wake marks write via addManualNap) that
+            // END on this day — the same end-day attribution analyzeDay's `matched` filter uses — and
+            // hand them to analyzeDay to be SCORED. Without this there are no sessions at all, so
+            // restingHr/avgHrv (and Charge) go null: the later edit-fold restores duration + stages only.
+            val manualWindows: List<Pair<Long, Long>> =
                 repo.sleepSessions(computedId, from, to, STREAM_LIMIT)
                     .filter { it.userEdited && AnalyticsEngine.dayString(it.endTs, tzOffsetSeconds) == day }
                     .map { it.effectiveStartTs to it.endTs }
@@ -598,10 +588,8 @@ object IntelligenceEngine {
                 useSleepStagerV2 = useExperimentalSleepV2,
                 // #364 follow-up: same threading for the motion-aware wake refinement post-pass.
                 useMotionAwareWake = useMotionAwareWake,
-                // Manual-sleep-only: skip automatic detection and score the user's OWN logged windows
-                // (read above) through the identical per-session physiology, so RHR/HRV/Charge behave
-                // exactly as they do for a detected night.
-                manualSleepOnly = manualSleepOnly,
+                // The user's OWN logged windows (read above), scored through the full per-session
+                // physiology so RHR/HRV/Charge are populated.
                 manualSleepWindows = manualWindows,
                 // Sleep & Rest test mode (Test Centre E5): thread the trace sink straight through. null (the
                 // default) keeps analyzeDay's byte-identical untraced path; when the caller passed a non-null

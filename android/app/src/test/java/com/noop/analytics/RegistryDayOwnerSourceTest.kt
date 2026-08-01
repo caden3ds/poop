@@ -62,7 +62,6 @@ class RegistryDayOwnerSourceTest {
         override suspend fun deleteBatteryFor(deviceId: String) {}
         override suspend fun deleteDailyMetricsFor(deviceId: String) {}
         override suspend fun deleteSleepSessionsFor(deviceId: String) {}
-        override suspend fun deleteJournalFor(deviceId: String) {}
         override suspend fun deleteWorkoutsFor(deviceId: String) {}
         override suspend fun deleteAppleDailyFor(deviceId: String) {}
         override suspend fun deleteMetricSeriesFor(deviceId: String) {}
@@ -94,7 +93,6 @@ class RegistryDayOwnerSourceTest {
         override suspend fun reKeyBattery(from: String, to: String) {}
         override suspend fun reKeyDailyMetrics(from: String, to: String) {}
         override suspend fun reKeySleepSessions(from: String, to: String) {}
-        override suspend fun reKeyJournal(from: String, to: String) {}
         override suspend fun reKeyWorkouts(from: String, to: String) {}
         override suspend fun reKeyAppleDaily(from: String, to: String) {}
         override suspend fun reKeyMetricSeries(from: String, to: String) {}

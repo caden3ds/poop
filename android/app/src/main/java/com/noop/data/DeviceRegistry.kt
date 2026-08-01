@@ -88,7 +88,6 @@ class DeviceRegistry(
             dao.reKeyBattery(activeId, serialId); dao.deleteBatteryFor(activeId)
             dao.reKeyDailyMetrics(activeId, serialId); dao.deleteDailyMetricsFor(activeId)
             dao.reKeySleepSessions(activeId, serialId); dao.deleteSleepSessionsFor(activeId)
-            dao.reKeyJournal(activeId, serialId); dao.deleteJournalFor(activeId)
             dao.reKeyWorkouts(activeId, serialId); dao.deleteWorkoutsFor(activeId)
             dao.reKeyAppleDaily(activeId, serialId); dao.deleteAppleDailyFor(activeId)
             dao.reKeyMetricSeries(activeId, serialId); dao.deleteMetricSeriesFor(activeId)
@@ -135,7 +134,7 @@ class DeviceRegistry(
      *
      * The table set is EVERY device-keyed table of [WhoopDatabase]: hrSample, rrInterval, spo2Sample,
      * skinTempSample, respSample, gravitySample, stepSample, ppgHrSample, ppgWaveformSample, event, battery, dailyMetric,
-     * sleepSession, journal, workout, appleDaily, metricSeries, dayOwnership, sleepStateSample, labMarker,
+     * sleepSession, workout, appleDaily, metricSeries, dayOwnership, sleepStateSample, labMarker,
      * liveSession, dismissedWorkout, dismissedSleep. DeviceRegistryTest.deleteDeviceDataCallsEveryDaoDeleteMethod
      * guards completeness (fails if a delete*For DAO method isn't wired in here).
      */
@@ -155,7 +154,6 @@ class DeviceRegistry(
             dao.deleteBatteryFor(id)
             dao.deleteDailyMetricsFor(id)
             dao.deleteSleepSessionsFor(id)
-            dao.deleteJournalFor(id)
             dao.deleteWorkoutsFor(id)
             dao.deleteAppleDailyFor(id)
             dao.deleteMetricSeriesFor(id)

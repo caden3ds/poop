@@ -1946,7 +1946,6 @@ class WhoopBleClient(
                         // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
                         useMotionAwareWake = PuffinExperiment.from(context).motionAwareWake,
                         // Manual-sleep-only mode: automatic detection off; nights come from the user's marks.
-                        manualSleepOnly = com.noop.ui.NoopPrefs.manualSleepOnly(context),
                         // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route this
                         // post-backfill pass's per-day sleep gate trace into the .sleep-tagged strap log, so a
                         // shared report carries the staging proof from THIS scoring pass too, not only the UI
@@ -5031,6 +5030,27 @@ class WhoopBleClient(
     val realtimeStatus: Triple<Boolean, Boolean, Boolean>
         get() = Triple(wantsRealtime, realtimeArmed, _state.value.bonded)
 
+    /**
+     * Why the link is down, for the overnight log — the facts [realtimeStatus] cannot express.
+     *
+     * A night that goes silent has several very different causes that all look identical from outside:
+     * the strap is off the wrist or out of range, a reconnect is in flight, or auto-reconnect has been
+     * PAUSED by the bond-loop give-up and nothing will retry until the user taps Connect. Without this
+     * the log could only say "no heart rate" and the cause had to be guessed.
+     */
+    val linkDiagnostics: String
+        get() {
+            val st = _state.value
+            return when {
+                st.connected && st.bonded -> "up"
+                st.connected -> "up/unbonded"
+                autoReconnectPausedForBondLoop -> "DOWN/paused-bondLoop"
+                gatt != null -> "DOWN/connecting"
+                scanning -> "DOWN/scanning"
+                else -> "DOWN/idle"
+            }
+        }
+
     fun setLucidNightCapture(on: Boolean) {
         val changed = lucidNightWantsRealtime != on
         lucidNightWantsRealtime = on
@@ -5101,6 +5121,13 @@ class WhoopBleClient(
         val want = screenWantsRealtime || continuousCaptureWantsNow() || lucidNightWantsRealtime
         wantsRealtime = want   // the keep-alive + post-bond arm-on-connect read this derived value
         if (want == realtimeArmed) return                          // no edge — nothing to send
+        // No link at all: send() would drop this on the floor (gatt == null), so latching [realtimeArmed]
+        // would record an arming that never happened. That is not cosmetic — the overnight diagnostic
+        // reads this flag, and it logged "armed=true" through four and a half hours of a night in which
+        // the strap sent nothing, which is precisely the evidence that misdirected the hunt. The
+        // post-bond branch arms from [wantsRealtime] the moment a link is established, so bailing here
+        // costs nothing.
+        if (!_state.value.connected) return
         if (connectedFamily != DeviceFamily.WHOOP4 && !_state.value.bonded) return   // can't reach the strap yet
         realtimeArmed = want
         // Both families arm/disarm via TOGGLE_REALTIME_HR; send() frames it correctly per family (puffin

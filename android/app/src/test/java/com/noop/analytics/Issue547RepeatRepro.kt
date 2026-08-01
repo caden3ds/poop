@@ -106,6 +106,10 @@ class Issue547RepeatRepro {
         importedWhoopDays: Set<String>,
         appleHealthDays: Set<String>,
         nowLocalMidnight: Long,
+        // The user's logged night for this day, if any. Automatic detection is gone, so a day only
+        // carries a computed total when the night was logged — the "did the desk get scored as sleep"
+        // cases below deliberately pass none.
+        manualWindows: List<Pair<Long, Long>> = emptyList(),
     ): String? {
         val day = dayKey(dayMidnightLocal)
         val from = dayMidnightLocal - 30 * 3_600L
@@ -129,6 +133,7 @@ class Issue547RepeatRepro {
             dayGravity = dayGrav,
             profile = profile,
             tzOffsetSeconds = tzOffset,
+            manualSleepWindows = manualWindows,
         )
         // sleepEditedDaily is a no-op with no edits, so `daily` == res.daily (the engine's exact value).
         val tsmLog = res.daily.totalSleepMin?.let { Math.round(it).toString() } ?: "nil"
@@ -188,9 +193,10 @@ class Issue547RepeatRepro {
     }
 
     @Test
-    fun appleImportedDay_withStrapHr_logsImportedTokenOnTopOfComputedTotal() {
-        // (B) An Apple-Health daily row covers the day AND the strap also has the table block. The day is
-        //     scored from the STRAP raw streams (Apple writes no raw HR), so tsmLog is the COMPUTED total;
+    fun appleImportedDay_withLoggedNight_logsImportedTokenOnTopOfComputedTotal() {
+        // (B) An Apple-Health daily row covers the day AND the user logged the night over the strap's
+        //     streams. The day is scored from the STRAP raw streams (Apple writes no raw HR), so tsmLog
+        //     is the COMPUTED total;
         //     the source token is just the "imported:apple" LABEL on top. This is the only way a
         //     "source=imported:apple" line can carry a number — it is the computed strap total, relabelled.
         val nowLocalMidnight = midnightLocal(
@@ -205,6 +211,10 @@ class Issue547RepeatRepro {
             importedWhoopDays = emptySet(),
             appleHealthDays = setOf(day),   // Apple covers this day
             nowLocalMidnight = nowLocalMidnight,
+            // The user logged this night. Since detection was removed that is the ONLY way a day can
+            // carry a computed total at all — which is exactly what this test is about: the
+            // "imported:apple" token is a LABEL over a real computed strap number, never a source of one.
+            manualWindows = listOf(dm - 2 * 3_600L to dm + 10 * 3_600L),
         )
         assertTrue("line must exist (strap HR present)", line != null)
         assertTrue("token must be imported:apple", line!!.contains("source=imported:apple"))

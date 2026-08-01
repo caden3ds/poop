@@ -48,18 +48,4 @@ class JournalNumericMigrationTest {
         assertEquals(14, WhoopDatabase.MIGRATION_13_14.endVersion)
     }
 
-    /**
-     * #322, a numeric log stores the value AND answeredYes=true (so the with/without split still counts
-     * the day), while a plain yes/no answer carries numericValue == null: an absent value stays absent,
-     * never a fabricated 0. The entity is what the DAO `SELECT *` reads back, so this pins the shape.
-     */
-    @Test
-    fun numericValue_entityShape() {
-        val numeric = JournalEntry("noop-journal", "2026-06-20", "Caffeine (mg)",
-            answeredYes = true, numericValue = 180.0)
-        val plain = JournalEntry("noop-journal", "2026-06-20", "Alcohol?", answeredYes = false)
-        assertEquals(180.0, numeric.numericValue!!, 0.0001)
-        assertTrue("a numeric log is also a yes for the with/without split", numeric.answeredYes)
-        assertNull("a plain answer carries no numeric reading", plain.numericValue)
-    }
 }

@@ -211,13 +211,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  The wizard observes this directly so its pick list updates as straps appear. */
     val discoveredWhoops: StateFlow<List<com.noop.ble.WhoopBleClient.DiscoveredWhoop>> = ble.discoveredWhoops
 
-    /** #656: a journal day-offset (daysBack; -1 = Tomorrow) the Today journal widget asks the journal
-     *  (Insights) to open at, so tapping a SPECIFIC day's bar lands on THAT day instead of always today.
-     *  InsightsScreen consumes it on open and clears it via [requestJournalDay]`(null)`. */
-    private val _pendingJournalDayOffset = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
-    val pendingJournalDayOffset: StateFlow<Long?> = _pendingJournalDayOffset
-    fun requestJournalDay(offset: Long?) { _pendingJournalDayOffset.value = offset }
-
     /**
      * Point the WHOOP scan at a specific family, then present nearby straps WITHOUT auto-connecting (the
      * Add-a-device wizard's WHOOP path). [WhoopBleClient.prepareForPresentScan] KEEPS a live same-model
@@ -667,7 +660,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     _v5Signals.value = V5HealthSignals.evaluate(
                         days = days,
                         cycleOptedIn = _cycleTrackingEnabled.value,
-                        journalContext = illnessJournalContext(days),
+                        confounderContext = illnessConfounderContext(days),
                     )
                 }
                 // Keep the home-screen widget fresh while the app is open — covers users who turned
@@ -805,7 +798,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         // Opt-in motion-aware wake refinement (#364 follow-up) — same Context-free threading.
                         useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
                         // Manual-sleep-only mode: automatic detection off; nights come from the user's marks.
-                        manualSleepOnly = NoopPrefs.manualSleepOnly(appContext),
                         // Sleep & Rest test mode (Test Centre E5): when the SLEEP domain is on, route the
                         // per-day sleep gate trace into the SAME shareable strap log, tagged .sleep so it
                         // lands under the profile in the export. Zero-cost when off: the gate is one
@@ -1421,7 +1413,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 useMotionAwareWake = PuffinExperiment.from(appContext).motionAwareWake,
                 // Manual-sleep-only mode — same flag the 15-min loop reads, so an edit-triggered rescore
                 // can't resurrect auto-detected nights the mode suppresses.
-                manualSleepOnly = NoopPrefs.manualSleepOnly(appContext),
             )
         }.onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
     }
@@ -2015,18 +2006,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             _v5Signals.value = V5HealthSignals.evaluate(
                 days = days,
                 cycleOptedIn = enabled,
-                journalContext = illnessJournalContext(days),
+                confounderContext = illnessConfounderContext(days),
             )
         }
     }
 
     /**
-     * Same-day confounder context for [IllnessSignalEngine] from the day's journal — alcohol / hard-or-late
-     * workout / "feeling unwell" suppress an anomaly so a hangover or a late session never reads as illness.
-     * Lightweight: derived from the latest day's exercise count + the cached "unwell" flag we can see here.
-     * (A fuller journal-tag read lands with the Mind pillar; this keeps the v5 pass honest without new I/O.)
+     * Same-day confounder context for [IllnessSignalEngine]: a hard or late session suppresses an
+     * anomaly so training load never reads as illness.
+     *
+     * Derived purely from the latest day's exercise count. It was named for a journal it never actually
+     * read — the "already unwell" flag has always been hardcoded false — so removing the journal changes
+     * nothing here beyond the name.
      */
-    private fun illnessJournalContext(days: List<DailyMetric>): IllnessSignalEngine.Context {
+    private fun illnessConfounderContext(days: List<DailyMetric>): IllnessSignalEngine.Context {
         val latest = days.lastOrNull()
         val hardOrLate = (latest?.exerciseCount ?: 0) >= 2
         return IllnessSignalEngine.Context(
@@ -2161,25 +2154,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         recordSleepBoundary(SleepMarkType.BEDTIME)
     }
 
-    // --- Manual-sleep-only mode: automatic detection off; the mark buttons DEFINE the night. ---
-
-    private val _manualSleepOnly = MutableStateFlow(NoopPrefs.manualSleepOnly(appContext))
-    /** Whether automatic sleep detection is disabled in favour of the bedtime/wake marks. */
-    val manualSleepOnly: StateFlow<Boolean> = _manualSleepOnly.asStateFlow()
+    // --- Sleep marks: the bedtime/wake buttons DEFINE the night. There is no automatic detection. ---
 
     private val _pendingBedtimeMs = MutableStateFlow(NoopPrefs.pendingBedtimeMs(appContext))
     /** The pending "Going to sleep" instant (epoch ms; 0 = none) awaiting its "I'm awake" twin —
      *  drives the Sleep screen's "bedtime marked at…" caption in manual mode. */
     val pendingBedtimeMs: StateFlow<Long> = _pendingBedtimeMs.asStateFlow()
-
-    /** Flip manual-sleep-only. Persists, then re-scores the window immediately so the change is visible
-     *  now: enabling stops fresh auto-detected nights this pass; disabling lets the next pass re-detect.
-     *  Already-persisted sessions are untouched either way (user-logged rows are never auto-removed). */
-    fun setManualSleepOnly(enabled: Boolean) {
-        NoopPrefs.setManualSleepOnly(appContext, enabled)
-        _manualSleepOnly.value = enabled
-        viewModelScope.launch { rescoreAfterEdit() }
-    }
 
     /** A stale pending bedtime: past this span with no wake tap, closing the "night" would fabricate an
      *  implausible 18h+ sleep — mirror the detector's own 16 h span-cap philosophy and refuse instead. */
@@ -2198,6 +2178,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * re-scored immediately). Returns the toast text describing what actually happened — honest about
      * every refusal, so a tap never silently does nothing.
      */
+    /**
+     * Discard an open bedtime mark WITHOUT logging a night.
+     *
+     * Marking bedtime is a one-way door otherwise: tapping it by mistake leaves an open night that can
+     * only be closed by logging a real (wrong) session or waiting for it to go stale. It also holds the
+     * lucid sleep clock, so a stray mark would have the cue path believing you were asleep.
+     */
+    fun cancelSleepBoundary(): String {
+        if (_pendingBedtimeMs.value <= 0L) return "No bedtime mark to cancel."
+        NoopPrefs.setPendingBedtimeMs(appContext, 0L)
+        _pendingBedtimeMs.value = 0L
+        ble.externalLog("Sleep mark: pending bedtime cancelled by the user")
+        return "Bedtime mark cancelled. Nothing was logged."
+    }
+
     fun recordSleepBoundary(type: SleepMarkType): String {
         val mark = SleepMark.now(type)
         ble.externalLog(mark.logLine())
@@ -2206,8 +2201,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // in manual mode unchanged (it's the debugging record; the session is the product).
             runCatching { repository.upsertMetricSeries(listOf(mark.metricPoint("my-whoop"))) }
         }
-        if (!_manualSleepOnly.value) return mark.confirmation()
-
+        // The pending bedtime does two jobs: it opens the night AND it is the lucid trainer's sleep clock.
         if (type == SleepMarkType.BEDTIME) {
             NoopPrefs.setPendingBedtimeMs(appContext, mark.tsMs)
             _pendingBedtimeMs.value = mark.tsMs

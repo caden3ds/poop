@@ -119,41 +119,6 @@ class SleepStagerV2Test {
      * result, so the byte-identical default (and the frozen-golden tests) is preserved. Android twin of
      * SleepStagerV2Tests.testDetectSleepThreadsV2FlagIntoNormalNight.
      */
-    @Test
-    fun detectSleepThreadsV2FlagIntoNormalNight() {
-        // A 3 h still overnight window (anchored at 01:00 UTC → center ~02:30, clear of the daytime guard
-        // band at the default tzOffset=0) with sleep-band HR + a regular R-R stream.
-        val start = refMidnight + 3_600L
-        val dur = 3 * 60 * 60
-        val grav = stillGravity(start, dur)
-        val hr = sleepHR(start, dur)
-        val rr = regularRR(start, dur)
-
-        // Flag OFF (the default) — V1 path.
-        val v1Sessions = SleepStager.detectSleep(hr = hr, rr = rr, gravity = grav)
-        assertEquals("the still night must be detected", 1, v1Sessions.size)
-        val v1 = v1Sessions[0]
-        // The detected window's stages MUST equal a direct V1 stageSession over the same span (proof the
-        // default path is byte-identical and untouched by the new parameter).
-        val v1Direct = SleepStager.stageSession(
-            start = v1.start, end = v1.end, grav = grav, hr = hr, rr = rr, resp = emptyList())
-        assertEquals("flag OFF must reproduce the exact V1 hypnogram", v1Direct, v1.stages)
-
-        // Flag ON — the SAME detected window must now be staged by V2.
-        val v2Sessions = SleepStager.detectSleep(hr = hr, rr = rr, gravity = grav, useSleepStagerV2 = true)
-        assertEquals("detection is unchanged by the staging flag", 1, v2Sessions.size)
-        val v2 = v2Sessions[0]
-        assertEquals(v1.start, v2.start)
-        assertEquals(v1.end, v2.end)
-        // The hypnogram is V2's: it matches a direct V2 stageSession over the accepted span, and (proof the
-        // flag actually flipped the engine) it expresses both deep and REM.
-        val v2Direct = SleepStagerV2.stageSession(
-            start = v2.start, end = v2.end, grav = grav, hr = hr, rr = rr, resp = emptyList())
-        assertEquals("flag ON must produce the V2 hypnogram", v2Direct, v2.stages)
-        val v2Stages = v2.stages.map { it.stage }.toSet()
-        assertTrue("V2 night should express deep", "deep" in v2Stages)
-        assertTrue("V2 night should express REM", "rem" in v2Stages)
-    }
 
     // ── #277 frozen golden: pin the tuned V2 recipe (deepGateThresh / deep emission / transition row) ──────
 

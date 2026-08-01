@@ -97,7 +97,6 @@ object DemoSeeder {
         val series = ArrayList<MetricSeriesRow>(DAYS * 2)
         val apple = ArrayList<AppleDaily>(DAYS)
         val workouts = ArrayList<WorkoutRow>()
-        val journal = ArrayList<JournalEntry>()
 
         var weight = 79.5
         var fitness = 0.0 // slow upward drift: HRV rises, resting-HR falls, VO2max climbs
@@ -235,12 +234,6 @@ object DemoSeeder {
                 )
             }
 
-            // --- journal answers for the recent 40 days ---
-            if (i >= DAYS - 40) {
-                journal.add(JournalEntry(WHOOP, day, "Any alcohol?", rng.nextDouble() < 0.18))
-                journal.add(JournalEntry(WHOOP, day, "Caffeine after 4pm?", rng.nextDouble() < 0.30))
-                journal.add(JournalEntry(WHOOP, day, "Felt stressed?", rng.nextDouble() < 0.28))
-            }
         }
 
         // --- weekly Fitness Age + VO2max estimate (the engine stamps these on each week's
@@ -295,7 +288,6 @@ object DemoSeeder {
         repo.upsertMetricSeries(series)
         repo.upsertAppleDaily(apple)
         if (workouts.isNotEmpty()) repo.upsertWorkouts(workouts)
-        if (journal.isNotEmpty()) repo.upsertJournal(journal)
     }
 
     // MARK: - helpers

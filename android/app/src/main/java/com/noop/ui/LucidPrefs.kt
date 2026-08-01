@@ -81,6 +81,34 @@ object LucidPrefs {
     /** Whether the link ever reached "bonded" — the gate the arming refuses on. */
     const val LAST_NIGHT_BONDED = "lucid.lastNight.bonded"
 
+    /**
+     * The bedtime this night ran against (epoch ms), or 0 if the user never marked one.
+     *
+     * Recorded per night so the morning summary can tell "you never told the app you were going to bed"
+     * apart from "the strap never streamed" — both otherwise land on zero heart-rate ticks and read as a
+     * malfunction. Only the first is the user's to fix.
+     */
+    const val LAST_NIGHT_BEDTIME_MS = "lucid.lastNight.bedtimeMs"
+
+    /**
+     * How many ticks the estimator actually produced a confidence for.
+     *
+     * The single fact that separates "the night ran and found no REM" from "the night never ran". Every
+     * not-running cause — no template, no floor, a stream too thin — surfaces as a zero confidence, and
+     * a zero confidence is indistinguishable from a real one. Counting the answers makes it decidable.
+     */
+    const val LAST_NIGHT_ESTIMATES = "lucid.lastNight.estimates"
+
+    /**
+     * Ticks the night ran with NO heart rate at all — the strap link down.
+     *
+     * Counted beside [LAST_NIGHT_HR_TICKS] rather than folded into it, because a night can be half real
+     * and half blackout and the average hides exactly the half that matters. One night estimated
+     * normally for 90 minutes and then sat at hr=0 for four and a half hours; the summary, reading only
+     * the good half, would have called that a night that simply never got confident enough.
+     */
+    const val LAST_NIGHT_NO_HR_TICKS = "lucid.lastNight.noHrTicks"
+
     const val DEFAULT_DAY_CUES_PER_DAY = 4
     const val DEFAULT_DAY_START_MIN = 10 * 60   // 10:00
     const val DEFAULT_DAY_END_MIN = 21 * 60     // 21:00

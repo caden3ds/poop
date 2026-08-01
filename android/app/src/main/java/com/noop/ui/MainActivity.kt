@@ -187,19 +187,6 @@ object NoopPrefs {
      *  [com.noop.ble.WhoopBleClient] at every arm site (re-derived at arm time, never cached). */
     const val KEY_CONTINUOUS_HRV_OVERNIGHT = "noop.continuousHrvOvernight"
 
-    /** The calendar day (yyyy-MM-dd) on which the morning-journal nudge was last shown, keeps the
-     *  Sleep screen's "Good morning" sheet to at most once per day. */
-    const val KEY_LAST_JOURNAL_PROMPT = "noop.lastJournalPromptDay"
-
-    /** "Journal reminder" (#627). When ON, Today shows a dismissible card whenever nothing has been
-     *  logged to today's journal yet, and the Sleep screen's morning sheet may fire — one switch gates
-     *  both surfaces. Default ON. Mirrors iOS @AppStorage("noopJournalReminder"). */
-    const val KEY_JOURNAL_REMINDER_ENABLED = "noop.journalReminder"
-
-    /** The calendar day (yyyy-MM-dd) on which the Today journal-reminder card was last dismissed, so an
-     *  X hides it until the next day (per-day, like [KEY_LAST_JOURNAL_PROMPT]). */
-    const val KEY_JOURNAL_REMINDER_DISMISSED_DAY = "noop.journalReminderDismissedDay"
-
     /** "Debug logging", when on, the strap log is also written to logcat (`adb`). Default OFF so a
      *  normal user never emits the connection log to the system log; the in-app ring buffer (and the
      *  "Share strap log" export) work regardless. See [com.noop.ble.WhoopBleClient.debugLogcat]. */
@@ -437,18 +424,6 @@ object NoopPrefs {
         of(context).edit().putLong(KEY_HC_HR_FRONTIER, tsSec).apply()
     }
 
-    /** Manual sleep only: automatic sleep detection is fully disabled; nights come exclusively from the
-     *  Sleep screen's "Going to sleep" / "I'm awake" marks (or a hand-added session). Opt-in, default
-     *  OFF — flipping it on makes the mark buttons DEFINE the night instead of only logging it. */
-    const val KEY_MANUAL_SLEEP_ONLY = "noop.manualSleepOnly"
-
-    fun manualSleepOnly(context: Context): Boolean =
-        of(context).getBoolean(KEY_MANUAL_SLEEP_ONLY, false)
-
-    fun setManualSleepOnly(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_MANUAL_SLEEP_ONLY, enabled).apply()
-    }
-
     /** The pending "Going to sleep" instant (epoch ms; 0 = none) awaiting its "I'm awake" twin in
      *  manual-sleep-only mode. Persisted (not in-memory) so a bedtime marked at 23:40 survives the app
      *  being killed overnight and the morning wake tap still closes the night. */
@@ -617,13 +592,6 @@ object NoopPrefs {
 
     fun setAutoDetectWorkouts(context: Context, enabled: Boolean) {
         of(context).edit().putBoolean(KEY_AUTO_DETECT_WORKOUTS, enabled).apply()
-    }
-
-    fun journalReminderEnabled(context: Context): Boolean =
-        of(context).getBoolean(KEY_JOURNAL_REMINDER_ENABLED, true)
-
-    fun setJournalReminderEnabled(context: Context, enabled: Boolean) {
-        of(context).edit().putBoolean(KEY_JOURNAL_REMINDER_ENABLED, enabled).apply()
     }
 
     /** Last local day (ISO yyyy-MM-dd) an illness notification was posted, the once-a-day gate,

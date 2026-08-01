@@ -49,13 +49,13 @@ object V5HealthSignals {
      * Run the three engines over [days] (oldest→newest). [cycleOptedIn] gates whether the cycle classifier
      * is run at all (it returns a cheap LEARNING result when off, so the caller can publish unconditionally
      * and the UI's opt-in card still shows). [loggedPeriodStarts] are optional "yyyy-MM-dd" period-start
-     * days. [journalContext] supplies the same-day confounder flags for illness suppression.
+     * days. [confounderContext] supplies the same-day flags that suppress a false illness call.
      */
     fun evaluate(
         days: List<DailyMetric>,
         cycleOptedIn: Boolean,
         loggedPeriodStarts: List<String> = emptyList(),
-        journalContext: IllnessSignalEngine.Context = IllnessSignalEngine.Context(),
+        confounderContext: IllnessSignalEngine.Context = IllnessSignalEngine.Context(),
         habitualWakeHour: Double = 7.0,
     ): Snapshot {
         val baselineTrusted = days.count { hasAnyVital(it) } >= MIN_BASELINE_NIGHTS
@@ -107,7 +107,7 @@ object V5HealthSignals {
         )
         val illness = IllnessSignalEngine.evaluate(
             inputs = illnessInputs,
-            context = journalContext.copy(baselineTrusted = baselineTrusted),
+            context = confounderContext.copy(baselineTrusted = baselineTrusted),
             firedLabels = firedLabels,
         )
 

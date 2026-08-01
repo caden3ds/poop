@@ -133,7 +133,6 @@ import kotlin.math.roundToInt
 @Composable
 fun SleepScreen(
     vm: AppViewModel,
-    onOpenJournal: () -> Unit = {},
 ) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
     // Whether the ACTIVE strap is an Oura ring, off the canonical brand table (not an "oura" literal) — so
@@ -269,70 +268,6 @@ fun SleepScreen(
     // SharedPreferences isn't reactive, so it's read once into local state (mirrors iOS @AppStorage).
     // Sky-behind-cards (#434 family): when on, the sky fills the whole viewport so the transparent
     // cards reveal it the whole way down, exactly like Today and the metric-detail screens.
-
-    // Morning-journal nudge: once per calendar day, when the freshest night ended within the last
-    // 12 hours, invite the user to log how they felt. The shown-day is persisted so the sheet never
-    // re-pops on a recomposition or a same-day re-open. (PR #260)
-    var showJournalPrompt by remember { mutableStateOf(false) }
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    LaunchedEffect(sleeps) {
-        // #627: the journal-reminder toggle (default ON) gates this morning sheet too, so disabling the
-        // reminder silences both the Today card and this sheet with one switch.
-        if (!NoopPrefs.journalReminderEnabled(context)) return@LaunchedEffect
-        val latestEnd = sleeps.lastOrNull()?.endTs ?: return@LaunchedEffect
-        val nowS = System.currentTimeMillis() / 1000L
-        val hoursAgo = (nowS - latestEnd) / 3600.0
-        if (hoursAgo in 0.0..12.0) {
-            val today = LocalDate.now().toString()
-            // #684: don't nudge when today's journal is already logged — e.g. via the Today card (#656),
-            // which never sets KEY_LAST_JOURNAL_PROMPT, so the once-per-day dedup alone would still pop
-            // this sheet. Reuse the SAME completion signal the Today card uses (repo.journal for today).
-            val loggedToday = runCatching {
-                vm.repo.journal(JOURNAL_DEVICE_ID, today, today).any { it.day == today }
-            }.getOrDefault(false)
-            if (loggedToday) return@LaunchedEffect
-            val prefs = NoopPrefs.of(context)
-            val lastPrompted = prefs.getString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, "")
-            if (lastPrompted != today) {
-                prefs.edit().putString(NoopPrefs.KEY_LAST_JOURNAL_PROMPT, today).apply()
-                showJournalPrompt = true
-            }
-        }
-    }
-
-    if (showJournalPrompt) {
-        ModalBottomSheet(
-            onDismissRequest = { showJournalPrompt = false },
-            sheetState = sheetState,
-            containerColor = Palette.surfaceRaised,
-            contentColor = Palette.textPrimary,
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(Metrics.space24),
-                verticalArrangement = Arrangement.spacedBy(Metrics.space16),
-            ) {
-                Text(uiString(R.string.l10n_sleep_screen_good_morning_33e88869), style = NoopType.title2, color = Palette.textPrimary)
-                Text(
-                    uiString(R.string.l10n_sleep_screen_your_night_data_is_in_logging_ec461720),
-                    style = NoopType.subhead,
-                    color = Palette.textSecondary,
-                )
-                Button(
-                    onClick = { showJournalPrompt = false; onOpenJournal() },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = Palette.accent),
-                ) {
-                    Text(uiString(R.string.l10n_sleep_screen_open_journal_4bf0daee), style = NoopType.headline, color = Palette.surfaceBase)
-                }
-                TextButton(
-                    onClick = { showJournalPrompt = false },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(uiString(R.string.l10n_sleep_screen_maybe_later_27ad1d83), style = NoopType.subhead, color = Palette.textTertiary)
-                }
-            }
-        }
-    }
 
     // Tapping a metric tile opens a full-history detail sheet for that one metric. (PR #260)
     val metricSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -507,13 +442,14 @@ fun SleepScreen(
             // lives in ONE place — AppViewModel.recordSleepBoundary — shared with the double-tap
             // automation, and its returned string is the honest toast for what actually happened.
             item {
-            val manualMode = vm.manualSleepOnly.collectAsStateWithLifecycle().value
             val pendingBedtime = vm.pendingBedtimeMs.collectAsStateWithLifecycle().value
             SleepMarkCard(
                 onMark = { type ->
                     Toast.makeText(context, vm.recordSleepBoundary(type), Toast.LENGTH_LONG).show()
                 },
-                manualMode = manualMode,
+                onCancelMark = {
+                    Toast.makeText(context, vm.cancelSleepBoundary(), Toast.LENGTH_LONG).show()
+                },
                 pendingBedtimeMs = pendingBedtime,
             )
             }
@@ -654,27 +590,33 @@ fun SleepScreen(
 @Composable
 private fun SleepMarkCard(
     onMark: (SleepMarkType) -> Unit,
-    // Manual-sleep-only mode: when ON, the two buttons DEFINE the night (bedtime opens it, wake closes
-    // it into a real user-owned session) and automatic detection is disabled engine-wide. The MODE
-    // itself is set in Settings → Sleep (it changes how every night is scored, so it belongs with the
-    // settings, not on the screen you glance at); this card owns only the two ACTIONS. The pending
-    // bedtime (epoch ms; 0 = none) is shown BELOW the buttons as live state, so nothing sits between
-    // the card header and the controls.
-    manualMode: Boolean,
+    // The marks DEFINE the night: bedtime opens it, wake closes it into a real user-owned session.
+    // There is no automatic detection to fall back on, so an unmarked night is simply not scored. The
+    // pending bedtime (epoch ms; 0 = none) is shown BELOW the buttons as live state, so nothing sits
+    // between the card header and the controls.
     pendingBedtimeMs: Long,
+    onCancelMark: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.gap)) {
         SectionHeader(
             title = uiString(R.string.l10n_sleep_screen_sleep_marks_8e9b86f0),
             overline = "Tap to log",
-            trailing = if (manualMode) "Manual" else "Phase 1",
+            trailing = null,
         )
         NoopCard(tint = Palette.restColor) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                // ONE control that reflects the actual state, rather than two buttons always shown.
+                //
+                // Before, "Going to sleep" and "I'm awake" sat side by side regardless of whether a night
+                // was open — so the invalid action was always offered, and a mis-tapped bedtime could
+                // only be undone by logging a wrong night or waiting ~18 h for it to go stale. Now:
+                // no open night → just "Going to sleep"; open night → "I'm awake" plus "Cancel".
+                if (pendingBedtimeMs <= 0L) {
                     Button(
                         onClick = { onMark(SleepMarkType.BEDTIME) },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = uiString(R.string.l10n_sleep_screen_log_going_to_sleep_6c2b519d) },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = uiString(R.string.l10n_sleep_screen_log_going_to_sleep_6c2b519d)
+                        },
                         colors = ButtonDefaults.buttonColors(
                             containerColor = Palette.surfaceInset,
                             contentColor = Palette.textPrimary,
@@ -684,22 +626,40 @@ private fun SleepMarkCard(
                         Spacer(Modifier.width(8.dp))
                         Text(uiString(R.string.l10n_sleep_screen_going_to_sleep_9c6c63fd), style = NoopType.subhead)
                     }
-                    Button(
-                        onClick = { onMark(SleepMarkType.WAKE) },
-                        modifier = Modifier.weight(1f).semantics { contentDescription = uiString(R.string.l10n_sleep_screen_log_waking_up_2f9c230e) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Palette.surfaceInset,
-                            contentColor = Palette.textPrimary,
-                        ),
-                    ) {
-                        Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(uiString(R.string.l10n_sleep_screen_i_m_awake_2caf0e7f), style = NoopType.subhead)
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(Metrics.gap)) {
+                        Button(
+                            onClick = { onMark(SleepMarkType.WAKE) },
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = uiString(R.string.l10n_sleep_screen_log_waking_up_2f9c230e)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Palette.surfaceInset,
+                                contentColor = Palette.textPrimary,
+                            ),
+                        ) {
+                            Icon(Icons.Filled.WbSunny, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(uiString(R.string.l10n_sleep_screen_i_m_awake_2caf0e7f), style = NoopType.subhead)
+                        }
+                        // Discards the open mark WITHOUT logging a night — the undo for a mis-tap.
+                        Button(
+                            onClick = onCancelMark,
+                            modifier = Modifier.semantics {
+                                contentDescription = "Cancel the bedtime mark without logging a night"
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Palette.surfaceBase,
+                                contentColor = Palette.textSecondary,
+                            ),
+                        ) {
+                            Text("Cancel", style = NoopType.subhead)
+                        }
                     }
                 }
                 // Live state only, and BELOW the controls: an open night the user still has to close.
                 // Nothing else sits between the header and the buttons.
-                if (manualMode && pendingBedtimeMs > 0L) {
+                if (pendingBedtimeMs > 0L) {
                     Text(
                         "Bedtime marked at " +
                             java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)

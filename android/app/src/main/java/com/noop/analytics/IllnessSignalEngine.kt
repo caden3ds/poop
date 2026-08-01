@@ -8,7 +8,7 @@ package com.noop.analytics
 // resting HR ↑, skin temperature ↑, HRV (RMSSD) ↓ and respiration ↑ move TOGETHER, days before symptoms.
 // NOOP re-derives the PATTERN, transparently, against the user's OWN rolling baseline — never a population
 // cutoff. Replaces the blunt 2-of-4 threshold rule with a calibrated 0–100 score, a ≥2-signal
-// corroboration gate, and EXPLICIT confounder suppression cross-checked against the same-day journal tags.
+// corroboration gate, and EXPLICIT confounder suppression from the same-day training load.
 //
 // WELLNESS ONLY — APPROXIMATE, NOT A DIAGNOSIS. Never names a condition; copy is always "a heads-up to
 // rest" / "consider taking it easy".

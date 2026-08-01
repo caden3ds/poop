@@ -28,7 +28,6 @@ import com.noop.alarm.SmartAlarmStore
 import com.noop.analytics.LiveRemEstimator
 import com.noop.analytics.LucidCuePolicy
 import com.noop.ui.LucidPrefs
-import com.noop.ui.NotifPrefs
 import com.noop.analytics.BatteryEstimator
 import com.noop.analytics.IllnessWatch
 import com.noop.analytics.RestScorer
@@ -158,17 +157,10 @@ class WhoopConnectionService : Service() {
     private var lucidLoggedInRem: Boolean? = null
     private var lucidLoggedHold: String? = null
     private var lucidLoggedArmed: Boolean? = null
+
+    /** Last link state written to the night log, so a link that stays down logs once, not every tick. */
+    private var lucidLoggedLink: String? = null
     private var lucidLastHeartbeatMs = 0L
-
-    /** First HR tick of this sleep stretch at or below the sleep ceiling — the approximate sleep onset
-     *  the REM cycle prior is measured from. APPROXIMATE on purpose: it is the same "under the ceiling"
-     *  heuristic [SleepWindowWatcher] already encodes, and the prior only needs a coarse position in
-     *  the night. Cleared whenever HR sits above the ceiling long enough to mean the user is up. */
-    private var lucidAsleepSinceMs: Long? = null
-
-    /** Consecutive above-ceiling ticks, used to clear [lucidAsleepSinceMs] without a single stray
-     *  high reading (a turn-over spike) resetting the whole night's clock. */
-    private var lucidAwakeTicks = 0
 
     /** The smart-alarm HR collector, alive for the life of the service. */
     private var alarmJob: Job? = null
@@ -523,9 +515,11 @@ class WhoopConnectionService : Service() {
         lucidCaptureJob?.cancel()
         lucidCaptureJob = scope.launch {
             while (true) {
+                // Repair the link BEFORE deciding what to arm — an unrepaired link makes the rest moot.
+                runCatching { repairLinkIfDown() }
                 runCatching {
                     val want = LucidPrefs.nightEnabled(this@WhoopConnectionService) &&
-                        withinSleepingHours(System.currentTimeMillis())
+                        lucidBedtimeMs() > 0L
                     ble.setLucidNightCapture(want)
                     val (rtWanted, rtArmed, rtBonded) = ble.realtimeStatus
                     if (lucidLoggedArmed != rtArmed) {
@@ -543,33 +537,75 @@ class WhoopConnectionService : Service() {
     }
 
     /**
-     * Is [nowMs] inside the sleeping-hours window the realtime stream may be held open for?
+     * When the user said they were going to bed — epoch ms, or 0 when no night is open.
      *
-     * Reuses the notification quiet-hours window, which is the app's existing "the user is in bed"
-     * definition — rather than inventing a second one that could disagree with it. Wraps midnight.
+     * This is the lucid clock, and it is the ONLY one. It used to be inferred: the stream was held open
+     * during notification quiet hours, and sleep onset was guessed from the first sustained stretch under
+     * a 90 bpm ceiling. Both were wrong in the ways that mattered. The quiet-hours window is a
+     * NOTIFICATION setting the user never chose as a bedtime, so an early or late night sat outside it;
+     * and the HR ceiling calls "lying on the sofa" sleep while calling a restless first hour wakefulness,
+     * so `minutesAsleep` — which drives the REM cycle prior — was routinely off by an hour in either
+     * direction. The user already tells the app exactly this on the Sleep tab. Believe them.
+     *
+     * The tradeoff is explicit and one-sided: an unmarked night does nothing at all, silently, and both
+     * the night log and the Lucid screen say so rather than leaving it looking broken.
      */
-    private fun withinSleepingHours(nowMs: Long): Boolean {
-        val cal = java.util.Calendar.getInstance().apply { timeInMillis = nowMs }
-        val minuteOfDay = cal.get(java.util.Calendar.HOUR_OF_DAY) * 60 + cal.get(java.util.Calendar.MINUTE)
-        val start = NotifPrefs.getInt(this, NotifPrefs.QUIET_START, 22 * 60)
-        val end = NotifPrefs.getInt(this, NotifPrefs.QUIET_END, 7 * 60)
-        return if (start <= end) minuteOfDay in start until end
-        else minuteOfDay >= start || minuteOfDay < end
+    /**
+     * Retry the strap link when it is down. Runs on the same slow timer as the capture window.
+     *
+     * [reconnectSavedStrap] runs exactly ONCE, from onStartCommand, and nothing retried it. One failed
+     * attempt — the strap momentarily out of range as the service restarts, the radio busy — left the
+     * service foregrounded and permanently linkless. A night ended at 03:56 with a service restart and
+     * recorded four and a half hours of hr=0 afterwards, which is exactly that shape.
+     *
+     * The bond-loop pause is handled on its own terms rather than steamrolled: [salvageProbeIfBondLoopPaused]
+     * is already bounded to one attempt per floor window and leaves the give-up latched, so calling it on
+     * a five-minute tick cannot turn into the hammering the pause exists to prevent.
+     */
+    private fun repairLinkIfDown() {
+        if (ble.state.value.connected) return
+        val diag = ble.linkDiagnostics
+        // Log the transition only — a down link ticks every five minutes all night otherwise.
+        if (lucidLoggedLink != diag) {
+            lucidLoggedLink = diag
+            LucidNightLog.log(this, "LINK $diag — attempting repair")
+        }
+        ble.salvageProbeIfBondLoopPaused()
+        reconnectSavedStrap()
+    }
+
+    /** "" when tonight's own floor is in use, or e.g. "(learned 52)" when the fallback is carrying it. */
+    private fun effectiveFloorNote(floorNow: Int?): String {
+        if (floorNow != null && floorNow > 0) return ""
+        val learned = lucidTemplate?.typicalFloorBpm ?: return ""
+        return if (learned > 0.0) "(learned ${learned.toInt()})" else ""
+    }
+
+    private fun lucidBedtimeMs(): Long {
+        val marked = runCatching { NoopPrefs.pendingBedtimeMs(this) }.getOrDefault(0L)
+        if (marked <= 0L) return 0L
+        // A mark left open past any plausible night is a FORGOTTEN mark, not a very long sleep. This cap
+        // is what keeps the tradeoff one-sided: the realtime stream is now held open by the mark rather
+        // than by a clock window, so without it, one forgotten "Going to sleep" would stream heart rate
+        // all day and flatten the battery — the exact failure the old quiet-hours window prevented.
+        if (System.currentTimeMillis() - marked > LUCID_MAX_NIGHT_MS) return 0L
+        return marked
     }
 
     /**
      * Re-establish the link to the remembered strap when the service is running without one.
      *
-     * Safe to call on every onStartCommand: it no-ops when already connected, when the user opted out
-     * of background connection, or when no strap is remembered. Mirrors the ViewModel's launch-time
-     * auto-reconnect, which a service resurrected by the OS never gets to run.
+     * Safe to call repeatedly: it no-ops when already connected, when the user opted out of background
+     * connection, or when no strap is remembered. Mirrors the ViewModel's launch-time auto-reconnect,
+     * which a service resurrected by the OS never gets to run. Called from onStartCommand AND from the
+     * slow repair tick — see [repairLinkIfDown] for why once was not enough.
      */
     private fun reconnectSavedStrap() {
         runCatching {
             if (ble.state.value.connected) return
             if (!NoopPrefs.backgroundConnection(this)) return
             val saved = NoopPrefs.lastDevice(this) ?: return
-            ble.externalLog("FGS: restarted without a link — reconnecting to the saved strap")
+            ble.externalLog("FGS: no link — reconnecting to the saved strap")
             ble.reconnectToAddress(saved.first, saved.second)
         }
     }
@@ -713,8 +749,6 @@ class WhoopConnectionService : Service() {
         if (lucidNightKey != todayKey) {
             lucidNightKey = todayKey
             lucidRunner.reset()
-            lucidAsleepSinceMs = null
-            lucidAwakeTicks = 0
             if (prefs.getString(LucidPrefs.NIGHT_KEY, null) != todayKey) {
                 prefs.edit()
                     .putString(LucidPrefs.NIGHT_KEY, todayKey)
@@ -730,6 +764,9 @@ class WhoopConnectionService : Service() {
                     .putInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)
                     .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "")
                     .putInt(LucidPrefs.LAST_NIGHT_CUES, 0)
+                    .putLong(LucidPrefs.LAST_NIGHT_BEDTIME_MS, 0L)
+                    .putInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0)
+                    .putInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0)
                     .apply()
             }
             // Restore the spacing clock so a restart mid-night can't let the ramp fire immediately.
@@ -743,16 +780,27 @@ class WhoopConnectionService : Service() {
             loadLucidTemplate()
         }
 
-        // Approximate sleep onset: the first sustained under-ceiling stretch. A few high ticks in a row
-        // (up and about) clear it; one stray spike does not.
-        if (hr > LUCID_SLEEP_CEILING_BPM) {
-            lucidAwakeTicks++
-            if (lucidAwakeTicks >= LUCID_AWAKE_TICKS_TO_CLEAR) lucidAsleepSinceMs = null
-        } else {
-            lucidAwakeTicks = 0
-            if (lucidAsleepSinceMs == null) lucidAsleepSinceMs = now
+        // Sleep onset comes from the user, not from a guess. See [lucidBedtimeMs].
+        val bedtime = lucidBedtimeMs()
+        if (bedtime <= 0L) {
+            val stale = runCatching { NoopPrefs.pendingBedtimeMs(this) }.getOrDefault(0L) > 0L
+            val reason = if (stale) {
+                "Bedtime mark is over 12 h old — tap “I’m awake” or Cancel on the Sleep tab."
+            } else {
+                "No bedtime marked — tap “Going to sleep” on the Sleep tab."
+            }
+            if (lucidLoggedHold != reason) {
+                lucidLoggedHold = reason
+                LucidNightLog.log(this, "HOLD $reason")
+            }
+            return
         }
-        val minutesAsleep = lucidAsleepSinceMs?.let { ((now - it) / 60_000L).toInt() } ?: 0
+        // Record the mark this night is running against, so the morning summary can distinguish an
+        // unmarked night from a broken one (see LAST_NIGHT_BEDTIME_MS).
+        prefs.edit().putLong(LucidPrefs.LAST_NIGHT_BEDTIME_MS, bedtime).apply()
+        // A mark in the future (clock change, stale write) would make minutesAsleep negative and let the
+        // cycle prior read as "hours in" — clamp rather than trust the arithmetic.
+        val minutesAsleep = ((now - bedtime) / 60_000L).coerceAtLeast(0L).toInt()
 
         val state = LucidCuePolicy.NightState(
             cuesThisPeriod = prefs.getInt(LucidPrefs.CUES_THIS_PERIOD, 0),
@@ -795,11 +843,20 @@ class WhoopConnectionService : Service() {
                 LucidPrefs.LAST_NIGHT_HR_TICKS,
                 prefs.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0) + if (hr > 0) 1 else 0,
             )
+            // Its counterpart — see LAST_NIGHT_NO_HR_TICKS.
+            .putInt(
+                LucidPrefs.LAST_NIGHT_NO_HR_TICKS,
+                prefs.getInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0) + if (hr > 0) 0 else 1,
+            )
             .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, lucidTemplate?.nights ?: -1)
             .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, maxOf(floorNow, prefs.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)))
             .putInt(
                 LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE,
                 maxOf(confPct, prefs.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)),
+            )
+            .putInt(
+                LucidPrefs.LAST_NIGHT_ESTIMATES,
+                prefs.getInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0) + if (tick.remConfidence != null) 1 else 0,
             )
             .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, tick.holdReason ?: "")
             .putInt(
@@ -820,10 +877,16 @@ class WhoopConnectionService : Service() {
         // ── Timeline: REM transitions, hold-reason changes, a heartbeat, and every cue. ──────────────
         val inRemNow = tick.remConfidence?.let { it >= LiveRemEstimator.CUE_THRESHOLD } ?: false
         if (lucidLoggedInRem != inRemNow) {
+            // null -> false is not a transition, it is the first tick of the night. Logging it wrote
+            // "REM exit" at the top of every night and after every service restart, which reads in a
+            // diagnostic log as though REM had been entered and lost. null -> true still logs: that one
+            // is a real entry.
+            val firstTick = lucidLoggedInRem == null
             lucidLoggedInRem = inRemNow
-            LucidNightLog.log(
+            if (!firstTick || inRemNow) LucidNightLog.log(
                 this,
-                "REM ${if (inRemNow) "ENTER" else "exit"} conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +
+                "REM ${if (inRemNow) "ENTER" else "exit"} " +
+                    "conf=${tick.remConfidence?.let { "${(it * 100).toInt()}%" } ?: "—"} " +
                     "hr=$hr floor=${floorNow} asleep=${minutesAsleep}m",
             )
         }
@@ -835,9 +898,19 @@ class WhoopConnectionService : Service() {
             lucidLastHeartbeatMs = now
             LucidNightLog.log(
                 this,
-                "beat hr=$hr floor=$floorNow asleep=${minutesAsleep}m " +
-                    "conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +
-                    "template=${lucidTemplate?.nights ?: -1} armed=$rtArmed cues=${tick.nextState.cuesTonight}",
+                // Report the floor the estimate was ACTUALLY measured against. Logging only the
+                // tracker's own value read "floor=0" on every line of a night that was in fact
+                // estimating fine off the learned floor — which looked exactly like the failure it
+                // wasn't.
+                "beat hr=$hr floor=${floorNow ?: 0}${effectiveFloorNote(floorNow)} " +
+                    "asleep=${minutesAsleep}m " +
+                    // "—" when the estimator could not answer. Printing a null as 0% stated a reading
+                    // that was never taken: a night that never ran looked identical to a night that ran
+                    // and found no REM, and 0% on every line is what sent this hunt down the wrong path.
+                    "conf=${tick.remConfidence?.let { "${(it * 100).toInt()}%" } ?: "—"} " +
+                    "template=${lucidTemplate?.nights ?: -1} armed=$rtArmed " +
+                    // The missing fact. "armed" alone said nothing about whether the strap was reachable.
+                    "link=${ble.linkDiagnostics} cues=${tick.nextState.cuesTonight}",
             )
         }
 
@@ -913,17 +986,13 @@ class WhoopConnectionService : Service() {
          *  far from the midnight boundary a night straddles. */
         private const val LUCID_NIGHT_ROLLOVER_HOUR = 12
 
+        /** Longest a bedtime mark is believed for. Past this it reads as forgotten — see lucidBedtimeMs. */
+        private const val LUCID_MAX_NIGHT_MS = 12 * 60 * 60_000L
+
         private const val LUCID_TEMPLATE_LOOKBACK_DAYS = 30L
 
         /** Cap on nights folded into the template — recent enough to reflect current physiology. */
         private const val LUCID_TEMPLATE_MAX_NIGHTS = 14
-
-        /** HR at or below this counts as "asleep" for the lucid cycle prior — the same ceiling
-         *  [SleepWindowWatcher] uses. */
-        private const val LUCID_SLEEP_CEILING_BPM = 90
-
-        /** Consecutive above-ceiling ticks before the sleep-onset clock is cleared. */
-        private const val LUCID_AWAKE_TICKS_TO_CLEAR = 20
 
         private const val REBUZZ_STAMP_FRESH_MS = 35 * 60_000L
 

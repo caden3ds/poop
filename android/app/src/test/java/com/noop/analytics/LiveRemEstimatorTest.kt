@@ -63,8 +63,33 @@ class LiveRemEstimatorTest {
     }
 
     @Test
-    fun `no measured floor means no answer`() {
+    fun `no measured floor falls back to the learned typical floor`() {
+        // Tonight's floor comes from a tracker needing hours of unbroken coverage in one service
+        // lifetime, so it is null early and after any restart. Refusing outright cost a whole night:
+        // floor=0 on every tick meant confidence was never computed rather than merely low. The
+        // template's own median floor is the honest stand-in — every elevation figure in the template
+        // is measured against exactly that kind of floor.
         val e = LiveRemEstimator.estimate(List(20) { 60.0 }, floorBpm = null, template = template(), minutesAsleep = 200)
+        assertTrue("a learned floor must be enough to answer", e is Estimate.Read)
+    }
+
+    @Test
+    fun `tonight's own floor still wins over the learned one`() {
+        val t = template()!!
+        val hr = List(20) { 60.0 }
+        val onTypical = LiveRemEstimator.estimate(hr, null, t, minutesAsleep = 200) as Estimate.Read
+        // A floor well below the typical one raises the measured elevation, so the two must differ —
+        // proving the fallback is a fallback and not the value being used all along.
+        val onMeasured = LiveRemEstimator.estimate(hr, t.typicalFloorBpm - 8.0, t, minutesAsleep = 200) as Estimate.Read
+        assertTrue(onMeasured.confidence != onTypical.confidence)
+    }
+
+    @Test
+    fun `no floor anywhere still means no answer`() {
+        // The fallback must not become a licence to invent one: with neither a measured nor a learned
+        // floor there is nothing to measure elevation against, and nothing is the right answer.
+        val bare = template()!!.copy(typicalFloorBpm = 0.0)
+        val e = LiveRemEstimator.estimate(List(20) { 60.0 }, floorBpm = null, template = bare, minutesAsleep = 200)
         assertTrue(e is Estimate.Unavailable)
     }
 

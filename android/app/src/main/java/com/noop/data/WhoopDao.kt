@@ -183,9 +183,6 @@ interface WhoopDao : DeviceRegistryDao {
     suspend fun upsertMetricSeries(rows: List<MetricSeriesRow>)
 
     @Upsert
-    suspend fun upsertJournal(rows: List<JournalEntry>)
-
-    @Upsert
     suspend fun upsertWorkouts(rows: List<WorkoutRow>)
 
     @Upsert
@@ -473,44 +470,7 @@ interface WhoopDao : DeviceRegistryDao {
     @Query("UPDATE workout SET deviceId = :to WHERE deviceId = :from AND source = :source")
     suspend fun reassignWorkoutsBySource(from: String, to: String, source: String)
 
-    // MARK: - Journal / workouts / Apple-Health reads (mirror JournalWorkoutAppleCache.swift, v8)
-
-    /**
-     * Journal entries for days in [from, to] (lexicographic YYYY-MM-DD compare), oldest day first
-     * then by question. Port of JournalWorkoutAppleCache.swift journalEntries(deviceId:from:to:).
-     */
-    @Query(
-        "SELECT * FROM journal WHERE deviceId = :deviceId AND day >= :from AND day <= :to " +
-            "ORDER BY day ASC, question ASC"
-    )
-    suspend fun journal(deviceId: String, from: String, to: String): List<JournalEntry>
-
-    /**
-     * Delete one journal answer by natural key (the native logging card's "clear"). Source-scoped
-     * by deviceId, so clearing a native ("noop-journal") answer never removes an identical imported
-     * row. Port of JournalWorkoutAppleCache.swift deleteJournal(deviceId:day:question:).
-     */
-    @Query("DELETE FROM journal WHERE deviceId = :deviceId AND day = :day AND question = :question")
-    suspend fun deleteJournalEntry(deviceId: String, day: String, question: String)
-
-    /**
-     * Delete a device's journal within a day range (#136). The WHOOP importer clears exactly the span
-     * it re-writes before upserting, so the wake-day keying fix doesn't leave pre-fix onset-keyed rows
-     * behind as duplicates. Bounded to [from, to] — journal outside the imported range is never touched.
-     * Source-scoped by deviceId, so the native ("noop-journal") log is never touched.
-     */
-    @Query("DELETE FROM journal WHERE deviceId = :deviceId AND day >= :from AND day <= :to")
-    suspend fun deleteJournalRange(deviceId: String, from: String, to: String)
-
-    /**
-     * Atomically replace a device's journal within a day range (#136): clear [from, to] then upsert
-     * [rows] in ONE transaction, so a crash mid-import can't leave the range deleted-but-not-repopulated.
-     */
-    @Transaction
-    suspend fun replaceJournalRange(deviceId: String, from: String, to: String, rows: List<JournalEntry>) {
-        deleteJournalRange(deviceId, from, to)
-        upsertJournal(rows)
-    }
+    // MARK: - Workout / Apple-Health reads (mirror JournalWorkoutAppleCache.swift, v8)
 
     /**
      * Workouts whose startTs falls in [from, to] (unix seconds), oldest first, row-limited.

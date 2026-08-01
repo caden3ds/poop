@@ -85,6 +85,18 @@ object LiveRemEstimator {
         val nonRemInstabilityBpm: Double,
         /** How many scored nights went into this template. */
         val nights: Int,
+        /**
+         * The person's TYPICAL sleeping floor across those nights (bpm), used when tonight's own floor
+         * is not yet measurable.
+         *
+         * Tonight's floor is better and is always preferred. But it comes from a tracker needing hours
+         * of continuous coverage inside one service lifetime, so it is unavailable early in the night
+         * and after any restart — and with no floor the estimator refuses outright. A whole night was
+         * lost to exactly that: floor=0 on every tick, so confidence was never computed at all rather
+         * than merely low. A historical floor is the right stand-in because every elevation figure in
+         * this template is itself measured relative to a night's own floor.
+         */
+        val typicalFloorBpm: Double,
     ) {
         /**
          * True when the template actually separates REM from non-REM. A template whose two classes sit
@@ -139,12 +151,19 @@ object LiveRemEstimator {
         val nonElev = usable.map { mean(it.nonRemHr) - it.floorBpm }
         val nonInst = usable.map { stdDev(it.nonRemHr) }
 
+        // Median rather than mean: one unusually low night (a dropout reading, a cold night) should not
+        // drag the reference the whole estimate is measured against.
+        val floors = usable.map { it.floorBpm }.sorted()
+        val typicalFloor = if (floors.size % 2 == 1) floors[floors.size / 2]
+                           else (floors[floors.size / 2 - 1] + floors[floors.size / 2]) / 2.0
+
         return RemTemplate(
             remElevationBpm = remElev.average(),
             remInstabilityBpm = remInst.average(),
             nonRemElevationBpm = nonElev.average(),
             nonRemInstabilityBpm = nonInst.average(),
             nights = usable.size,
+            typicalFloorBpm = typicalFloor,
         )
     }
 
@@ -185,14 +204,19 @@ object LiveRemEstimator {
                 "Your REM and deep sleep look too alike on heart rate alone so far.",
             )
         }
-        if (floorBpm == null || floorBpm <= 0.0) {
-            return Estimate.Unavailable("Not enough of tonight recorded yet to know your sleeping floor.")
+        // Prefer tonight's measured floor; fall back to the learned typical one rather than refusing.
+        // Refusing was strictly worse: the tracker needs hours of unbroken coverage in a single service
+        // lifetime, so on a night with any restart it never answers and the estimator produces nothing
+        // at all — indistinguishable from the feature being broken.
+        val floor = floorBpm?.takeIf { it > 0.0 } ?: template.typicalFloorBpm
+        if (floor <= 0.0) {
+            return Estimate.Unavailable("No sleeping floor known yet — needs a scored night.")
         }
         if (recentHr.size < MIN_LIVE_SAMPLES) {
             return Estimate.Unavailable("Waiting on a steady heart-rate stream.")
         }
 
-        val elevation = mean(recentHr) - floorBpm
+        val elevation = mean(recentHr) - floor
         val instability = stdDev(recentHr)
 
         // Score each feature by which learned class it sits closer to, on a -1..+1 axis where +1 is

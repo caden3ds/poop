@@ -2,6 +2,8 @@ package com.noop.alarm
 
 import com.noop.analytics.LiveRemEstimator
 import com.noop.analytics.LucidCuePolicy
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -221,16 +223,51 @@ class LucidNightRunnerTest {
     }
 
     @Test
-    fun `never cues without a measured sleep floor`() {
+    fun `an unavailable estimate reports its own reason, not "Not in REM"`() {
+        // Both an Unavailable estimate and a low-confidence Read produce inRem=false, so the policy
+        // answers "Not in REM" for both. That masked every real cause behind a generic one and is why
+        // nights of logs said "Not in REM" when the estimator had in fact never run.
+        val runner = LucidNightRunner()
+        val floorless = template!!.copy(typicalFloorBpm = 0.0)
+        val tick = runner.onHeartRate(
+            hr = 60, nowMs = minute, floorBpm = null,
+            template = floorless, minutesAsleep = 200, state = LucidCuePolicy.NightState(), enabled = true,
+        )
+        assertNull(tick.cue)
+        assertNotNull("the estimator's reason must survive", tick.holdReason)
+        assertNotEquals("Not in REM", tick.holdReason)
+    }
+
+    @Test
+    fun `a real low-confidence read still reports Not in REM`() {
+        // The override must be narrow: when the estimator DID answer and simply found no REM, that is
+        // the honest reason and must not be replaced.
+        val runner = LucidNightRunner()
+        var hold: String? = null
+        for (i in 0 until 30) {
+            hold = runner.onHeartRate(
+                hr = 50, nowMs = i * minute, floorBpm = 49,
+                template = template, minutesAsleep = 200, state = LucidCuePolicy.NightState(), enabled = true,
+            ).holdReason
+        }
+        assertEquals("Not in REM", hold)
+    }
+
+    @Test
+    fun `never cues without any sleep floor at all`() {
+        // A null floor on its own no longer blocks the night — the template's learned typical floor
+        // stands in (see LiveRemEstimator). Strip that too and there is genuinely nothing to measure
+        // elevation against, so the runner must stay silent rather than cue on a guess.
         val runner = LucidNightRunner()
         var state = LucidCuePolicy.NightState()
+        val floorless = template!!.copy(typicalFloorBpm = 0.0)
         for (i in 0 until 60) {
             val tick = runner.onHeartRate(
                 hr = remPattern[i % remPattern.size], nowMs = i * minute, floorBpm = null,
-                template = template, minutesAsleep = 200, state = state, enabled = true,
+                template = floorless, minutesAsleep = 200, state = state, enabled = true,
             )
             state = tick.nextState
-            assertNull("no floor means no cue", tick.cue)
+            assertNull("no floor anywhere means no cue", tick.cue)
         }
     }
 
