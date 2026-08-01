@@ -10,7 +10,6 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -61,7 +60,6 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Vibration
-import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -603,23 +601,6 @@ fun SettingsScreen(
         }
     }
 
-    // Modern Photo Picker for the optional profile photo (no READ_EXTERNAL_STORAGE permission needed).
-    // Returns a single image Uri (or null if cancelled); we decode + downscale + persist off the main
-    // thread via ProfileAvatarStore, which updates the live avatar everywhere. Stored only on this phone.
-    val avatarPickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia(),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
-            val ok = withContext(Dispatchers.IO) {
-                ProfileAvatarStore.setAvatarFromUri(context, uri)
-            }
-            if (!ok) {
-                Toast.makeText(context, "Couldn't use that photo. Try another.", Toast.LENGTH_LONG).show()
-            }
-        }
-    }
-
     ScreenScaffold(
         title = uiString(R.string.l10n_settings_screen_settings_c7f73bb5),
         subtitle = "Your numbers, your strap, and how POOP works. All on this phone.",
@@ -627,29 +608,6 @@ fun SettingsScreen(
         // Read the revision counter so every profile write recomposes this subtree
         // (SharedPreferences is not observable; `mutate` bumps `rev` after each write).
         @Suppress("UNUSED_VARIABLE") val tick = rev
-
-        // --- Profile photo (optional, on-device) ---
-        // Split into its own section ahead of the body-numbers Profile card, mirroring the iOS
-        // SettingsView `profilePhotoCard` (person.crop.circle, the offline blurb). A large avatar + a
-        // Choose/Change button and, once set, a Remove. Local-only and honest: the picked image is
-        // downscaled and kept on this phone, never uploaded. Reads ProfileAvatarStore.hasAvatar
-        // (snapshot state) so the controls update the instant a photo is set or cleared.
-        // Day streak (#569): consecutive days with a Charge score, computed on-device from your own
-        // history. Uses NoopCard directly (not SettingsSection) to keep the wiring self-contained.
-        val streaks by vm.streaks.collectAsStateWithLifecycle()
-        NoopCard(tint = Palette.chargeColor) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(uiString(R.string.settings_streak_title), style = NoopType.subhead, color = Palette.textPrimary)
-                Text(
-                    pluralStringResource(R.plurals.settings_streak_run, streaks.current, streaks.current),
-                    style = NoopType.subhead, color = Palette.chargeColor,
-                )
-                Text(
-                    pluralStringResource(R.plurals.settings_streak_longest, streaks.longest, streaks.longest),
-                    style = NoopType.footnote, color = Palette.textSecondary,
-                )
-            }
-        }
 
         // --- Strap, alarms & automations ---
         // These were reachable only from the More page, which no longer exists. Settings is the single
@@ -695,45 +653,6 @@ fun SettingsScreen(
                     fullWidth = true,
                     onClick = onOpenLucid,
                 )
-            }
-        }
-
-        SettingsSection(
-            icon = Icons.Outlined.AccountCircle,
-            title = uiString(R.string.l10n_settings_screen_profile_photo_33f385bb),
-            blurb = "Optional. Add a photo for the avatar in the top-left. Stored only on this phone. POOP is offline, so it's never uploaded.",
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                ProfileAvatar(size = 64.dp, contentDescription = uiString(R.string.l10n_settings_screen_profile_photo_33f385bb))
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        NoopButton(
-                            text = if (ProfileAvatarStore.hasAvatar) "Change photo" else "Choose photo",
-                            kind = NoopButtonKind.Secondary,
-                            modifier = Modifier.weight(1f),
-                            onClick = {
-                                avatarPickerLauncher.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                                )
-                            },
-                        )
-                        if (ProfileAvatarStore.hasAvatar) {
-                            NoopButton(
-                                text = uiString(R.string.l10n_settings_screen_remove_photo_c8f5eda8),
-                                kind = NoopButtonKind.Tertiary,
-                                modifier = Modifier.weight(1f),
-                                onClick = { ProfileAvatarStore.clearAvatar(context) },
-                            )
-                        }
-                    }
-                }
             }
         }
 
@@ -1760,18 +1679,18 @@ fun SettingsScreen(
             blurb = "Move all your POOP data to another phone. Export saves everything (history, sleeps, workouts, settings) to a single file you can copy across; import replaces this phone's data with a backup.",
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                // Three equal-width buttons share the row (each takes a third via weight) — mirrors the
-                // iOS Backup card's three fullWidth NoopButtonStyle buttons. The busy spinner sits BELOW
-                // the row (not inside it) so it never steals a button's share of the width.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                // FULL-WIDTH and stacked, matching the iOS Backup card. They were three equal thirds of
+                // one row, which is narrower than the longest label ("Export CSV") on a phone — every
+                // button ellipsised to "Exp… Imp… Exp…", making two of the three unreadable and the
+                // destructive one indistinguishable from the safe one.
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     NoopButton(
                         text = uiString(R.string.l10n_settings_screen_export_0a116345),
                         kind = NoopButtonKind.Primary,
                         enabled = !backupBusy,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             backupBusy = true
                             exportLauncher.launch("noop-backup-${java.time.LocalDate.now()}.noopbak")
@@ -1782,7 +1701,7 @@ fun SettingsScreen(
                         text = uiString(R.string.l10n_settings_screen_import_4834caf8),
                         kind = NoopButtonKind.Secondary,
                         enabled = !backupBusy,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             backupBusy = true
                             importLauncher.launch(arrayOf("*/*"))
@@ -1793,7 +1712,7 @@ fun SettingsScreen(
                         text = uiString(R.string.l10n_settings_screen_export_csv_6bce63a3),
                         kind = NoopButtonKind.Secondary,
                         enabled = !backupBusy,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = {
                             backupBusy = true
                             csvExportLauncher.launch("noop-export-${java.time.LocalDate.now()}.zip")
@@ -2365,51 +2284,6 @@ fun SettingsScreen(
 
                 RowDivider()
 
-                // Support link — opens the project's contact email (same address the
-                // Support screen lists). NOOP is anonymous, so email is the support channel.
-                val supportInteraction = remember { MutableInteractionSource() }
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pressable(supportInteraction)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Palette.accent.copy(alpha = 0.10f))
-                        .border(1.dp, Palette.accent.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
-                        .clickable(
-                            interactionSource = supportInteraction,
-                            indication = null,
-                        ) {
-                            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                                data = Uri.parse("mailto:$SUPPORT_EMAIL")
-                                putExtra(Intent.EXTRA_SUBJECT, "POOP support")
-                            }
-                            try {
-                                context.startActivity(intent)
-                            } catch (_: ActivityNotFoundException) {
-                                Toast.makeText(context, "Email us at $SUPPORT_EMAIL", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
-                        .semantics { contentDescription = uiString(R.string.l10n_settings_screen_contact_support_at_support_email_f0c4adce, SUPPORT_EMAIL) },
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(uiString(R.string.l10n_settings_screen_support_contact_f4c31b01), style = NoopType.headline, color = Palette.textPrimary)
-                            Text(
-                                uiString(R.string.l10n_settings_screen_questions_feedback_bugs_support_email_ed10662a, SUPPORT_EMAIL),
-                                style = NoopType.footnote,
-                                color = Palette.textSecondary,
-                            )
-                        }
-                        Text("›", style = NoopType.title2, color = Palette.accent)
-                    }
-                }
-
-                RowDivider()
-
                 // CREDITS — the one place upstream is acknowledged, rather than scattering other
                 // people's handles and repo links through the app. The engineering provenance stays in
                 // the source comments, where it is useful; this is the user-facing version.
@@ -2491,7 +2365,6 @@ fun SettingsScreen(
     }
 }
 
-private const val SUPPORT_EMAIL = "thenoopapp@gmail.com"
 
 // MARK: - App icon swap (v3 "Titanium & Gold")
 

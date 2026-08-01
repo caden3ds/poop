@@ -92,9 +92,6 @@ class MainActivity : ComponentActivity() {
 
         // Load the Light/Dark/System + chart-colour preferences before first composition so the theme
         // and chart ramps are correct from the very first frame (no flash).
-        // Decode the optional on-device profile photo (if set) before first composition so the Today
-        // header + Settings avatars show it from the first frame. No-op when no photo is set.
-        ProfileAvatarStore.load(this)
 
         setContent {
             NoopTheme {
