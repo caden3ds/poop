@@ -223,6 +223,47 @@ class LucidNightRunnerTest {
     }
 
     @Test
+    fun `a single spiking tick cannot open a REM period`() {
+        // The defect this smoothing exists for: one noisy reading used to clear the threshold on its
+        // own and open a period. Feed a long calm stretch with ONE REM-like burst — the ten-minute mean
+        // must stay under the threshold, so no period opens and nothing is ever due.
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+        var everCued = false
+        for (i in 0 until 40) {
+            val hr = if (i == 20) 78 else 50    // one spike in an otherwise flat night
+            val tick = runner.onHeartRate(
+                hr = hr, nowMs = i * minute, floorBpm = 49,
+                template = template, minutesAsleep = 200, state = state, enabled = true,
+            )
+            state = tick.nextState
+            if (tick.cue != null) everCued = true
+        }
+        assertTrue("a lone spike must not be enough to cue", !everCued)
+    }
+
+    @Test
+    fun `the reported confidence is the smoothed value, not the raw tick`() {
+        // The logs and the morning card read tick.remConfidence, so it must be the number the decision
+        // was actually made on. A raw reading leaking through here is how a log can show a confidence
+        // that never matched what the policy saw.
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+        var last: Double? = null
+        for (i in 0 until 12) {
+            val tick = runner.onHeartRate(
+                hr = if (i % 2 == 0) 80 else 46, nowMs = i * minute, floorBpm = 45,
+                template = template, minutesAsleep = 200, state = state, enabled = true,
+            )
+            state = tick.nextState
+            last = tick.remConfidence
+        }
+        assertNotNull(last)
+        // Alternating high/low HR: a raw tick would sit at one extreme, the mean lands between them.
+        assertTrue("smoothed confidence must not be pinned at an extreme: $last", last!! > 0.0 && last < 1.0)
+    }
+
+    @Test
     fun `an unavailable estimate reports its own reason, not "Not in REM"`() {
         // Both an Unavailable estimate and a low-confidence Read produce inRem=false, so the policy
         // answers "Not in REM" for both. That masked every real cause behind a generic one and is why

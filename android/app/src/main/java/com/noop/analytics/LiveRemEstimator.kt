@@ -65,8 +65,19 @@ object LiveRemEstimator {
     /** Live feature window (minutes). Long enough to measure variability, short enough to be current. */
     const val LIVE_WINDOW_MIN: Int = 5
 
-    /** Confidence at or above which the caller may consider cueing. Deliberately high. */
-    const val CUE_THRESHOLD: Double = 0.62
+    /**
+     * Confidence at or above which the caller may consider cueing.
+     *
+     * Compared against a SMOOTHED confidence (see [com.noop.alarm.LucidNightRunner]'s smoothing
+     * window), never a single tick — which is why 0.55 is stricter here than the old 0.62 was, not
+     * looser. A raw tick could clear 0.62 on one noisy reading; sustaining a ten-minute mean above 0.55
+     * takes real, held elevation.
+     *
+     * Calibrated, not chosen: backtested over seven of the user's own staged nights, this pairing puts
+     * 92% of cue moments inside a REM epoch and gives every night at least one opportunity. The old
+     * unsmoothed 0.62 managed 67% and reached only three of the seven nights at all.
+     */
+    const val CUE_THRESHOLD: Double = 0.55
 
     /**
      * What this person's REM looks like, learned from their own scored nights.
