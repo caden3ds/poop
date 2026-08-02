@@ -756,17 +756,18 @@ class WhoopConnectionService : Service() {
                     .putInt(LucidPrefs.CUES_THIS_PERIOD, 0)
                     .putLong(LucidPrefs.LAST_CUE_AT, 0L)
                     .putBoolean(LucidPrefs.PERIOD_AROUSAL_ABORTED, false)
-                    // Fresh diagnostic for the new night. (LAST_NIGHT_KEY itself is written on every
-                    // tick below — see there for why.)
-                    .putInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0)
-                    .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, -1)
-                    .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)
-                    .putInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)
-                    .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "")
-                    .putInt(LucidPrefs.LAST_NIGHT_CUES, 0)
-                    .putLong(LucidPrefs.LAST_NIGHT_BEDTIME_MS, 0L)
-                    .putInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0)
-                    .putInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0)
+                    // The LAST_NIGHT_* summary is deliberately NOT cleared here.
+                    //
+                    // It used to be, and that destroyed the very night it was meant to describe. The key
+                    // rolls over at midday, hours after waking; this branch zeroed every figure while
+                    // leaving LAST_NIGHT_KEY still naming the night that had just finished — because
+                    // that key is written by the per-tick block below, which never runs once the bedtime
+                    // mark is cleared. From noon onwards the card therefore read "<last night>: no
+                    // bedtime was marked" for a night that had been marked, scored and cued.
+                    //
+                    // Instead the summary is rekeyed LAZILY, by the per-tick block, the moment the NEW
+                    // night first has something to say. So it always describes the most recent night
+                    // that produced data, and its key and its figures can never disagree.
                     .apply()
             }
             // Restore the spacing clock so a restart mid-night can't let the ramp fire immediately.
@@ -825,6 +826,10 @@ class WhoopConnectionService : Service() {
         val (rtWanted, rtArmed, rtBonded) = ble.realtimeStatus
         val floorNow = nightTrough.troughBpm(now) ?: 0
         val confPct = ((tick.remConfidence ?: 0.0) * 100).toInt()
+        // First write of a new night? Then the stored figures belong to the PREVIOUS one and must not be
+        // accumulated onto. Carrying the key and the reset together is what keeps them consistent.
+        val sameNight = prefs.getString(LucidPrefs.LAST_NIGHT_KEY, null) == todayKey
+        fun carried(key: String, default: Int = 0) = if (sameNight) prefs.getInt(key, default) else default
         prefs.edit()
             // Written EVERY tick, not just when the night counters reset.
             //
@@ -841,35 +846,39 @@ class WhoopConnectionService : Service() {
             // the stream was live, which is the first thing the morning summary keys off.
             .putInt(
                 LucidPrefs.LAST_NIGHT_HR_TICKS,
-                prefs.getInt(LucidPrefs.LAST_NIGHT_HR_TICKS, 0) + if (hr > 0) 1 else 0,
+                carried(LucidPrefs.LAST_NIGHT_HR_TICKS) + if (hr > 0) 1 else 0,
             )
             // Its counterpart — see LAST_NIGHT_NO_HR_TICKS.
             .putInt(
                 LucidPrefs.LAST_NIGHT_NO_HR_TICKS,
-                prefs.getInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0) + if (hr > 0) 0 else 1,
+                carried(LucidPrefs.LAST_NIGHT_NO_HR_TICKS) + if (hr > 0) 0 else 1,
             )
             .putInt(LucidPrefs.LAST_NIGHT_TEMPLATE_NIGHTS, lucidTemplate?.nights ?: -1)
-            .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, maxOf(floorNow, prefs.getInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, 0)))
+            .putInt(LucidPrefs.LAST_NIGHT_FLOOR_BPM, maxOf(floorNow, carried(LucidPrefs.LAST_NIGHT_FLOOR_BPM)))
             .putInt(
                 LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE,
-                maxOf(confPct, prefs.getInt(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE, 0)),
+                maxOf(confPct, carried(LucidPrefs.LAST_NIGHT_MAX_CONFIDENCE)),
             )
             .putInt(
                 LucidPrefs.LAST_NIGHT_ESTIMATES,
-                prefs.getInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0) + if (tick.remConfidence != null) 1 else 0,
+                carried(LucidPrefs.LAST_NIGHT_ESTIMATES) + if (tick.remConfidence != null) 1 else 0,
             )
             .putString(LucidPrefs.LAST_NIGHT_HOLD_REASON, tick.holdReason ?: "")
             .putInt(
                 LucidPrefs.LAST_NIGHT_STREAM_WANTED,
-                prefs.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0) + if (rtWanted) 1 else 0,
+                carried(LucidPrefs.LAST_NIGHT_STREAM_WANTED) + if (rtWanted) 1 else 0,
             )
             .putInt(
                 LucidPrefs.LAST_NIGHT_STREAM_ARMED,
-                prefs.getInt(LucidPrefs.LAST_NIGHT_STREAM_ARMED, 0) + if (rtArmed) 1 else 0,
+                carried(LucidPrefs.LAST_NIGHT_STREAM_ARMED) + if (rtArmed) 1 else 0,
             )
+            // Sticky WITHIN a night, not across all of them. These three were never cleared anywhere,
+            // so the two counters were lifetime totals and "bonded" latched true on the first successful
+            // bond the app ever made — which quietly disabled the summary's "never reached bonded"
+            // explanation from then on.
             .putBoolean(
                 LucidPrefs.LAST_NIGHT_BONDED,
-                rtBonded || prefs.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false),
+                rtBonded || (sameNight && prefs.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false)),
             )
             .putInt(LucidPrefs.LAST_NIGHT_CUES, tick.nextState.cuesTonight)
             .apply()

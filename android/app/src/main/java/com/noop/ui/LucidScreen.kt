@@ -449,6 +449,29 @@ private fun Hairline() {
  * heart rate -> template -> floor -> confidence -> policy, and only the earliest failure is
  * actionable. Each of those has been the real cause on a different night.
  */
+/**
+ * Human label for a night key ("2026-08-01") — the evening it began, so it spans into the next day.
+ *
+ * Rendered as a span ("Night of 1-2 Aug") rather than the bare key, with the marked bedtime appended
+ * when one is known. A single date is ambiguous for anyone whose bedtime is after midnight, which is
+ * exactly who this feature is for.
+ */
+private fun nightSpanLabel(nightKey: String, bedtimeMs: Long): String {
+    val start = runCatching { java.time.LocalDate.parse(nightKey) }.getOrNull()
+        ?: return nightKey
+    val end = start.plusDays(1)
+    val month = java.time.format.DateTimeFormatter.ofPattern("MMM")
+    val span = if (start.month == end.month) {
+        "Night of ${start.dayOfMonth}-${end.dayOfMonth} ${end.format(month)}"
+    } else {
+        "Night of ${start.dayOfMonth} ${start.format(month)} - ${end.dayOfMonth} ${end.format(month)}"
+    }
+    if (bedtimeMs <= 0L) return span
+    val clock = java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT)
+        .format(java.util.Date(bedtimeMs))
+    return "$span (marked $clock)"
+}
+
 private fun lucidLastNightSummary(context: android.content.Context): String {
     val p = LucidPrefs.of(context)
 
@@ -470,10 +493,15 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
     val cues = p.getInt(LucidPrefs.LAST_NIGHT_CUES, 0)
     val hold = p.getString(LucidPrefs.LAST_NIGHT_HOLD_REASON, "").orEmpty()
     val bedtimeMs = p.getLong(LucidPrefs.LAST_NIGHT_BEDTIME_MS, 0L)
+    // The stored key is the date the EVENING began, so a 01:51 bedtime is filed under the previous
+    // date — correct internally, and thoroughly confusing to read back when you habitually go to bed
+    // after midnight ("2026-08-01" for a night you experienced as the 2nd). Name the span instead, and
+    // use the actual marked bedtime when there is one.
+    val label = nightSpanLabel(night, bedtimeMs)
     val estimates = p.getInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0)
     val noHr = p.getInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0)
 
-    if (cues > 0) return "$night: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
+    if (cues > 0) return "$label: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
     val wanted = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0)
     val armed = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_ARMED, 0)
     val bonded = p.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false)
@@ -524,5 +552,5 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
         hold.isNotEmpty() -> "held: ${hold.lowercase()}"
         else -> "no cue was due"
     }
-    return "$night: no cues — $why. ($ticks heart-rate readings.)"
+    return "$label: no cues — $why. ($ticks heart-rate readings.)"
 }
