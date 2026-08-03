@@ -85,6 +85,33 @@ class LiveRemEstimatorTest {
     }
 
     @Test
+    fun `an awake heart rate is refused, not scored as maximal REM`() {
+        // THE REGRESSION GUARD. classAxis clamps to +1, so before this the scale had no top and a
+        // walking-around heart rate scored identically to perfect REM — which is exactly how the first
+        // cue this feature ever fired landed at 10am with the sleeper up and about, against a bedtime
+        // mark left open overnight. Awake outscored every real REM period of that night.
+        val t = template()!!
+        val floor = 41.0
+        // ~85-100 bpm over a 41 bpm floor: the real figures from that morning.
+        val awake = listOf(85.0, 92.0, 102.0, 97.0, 88.0, 95.0, 100.0, 90.0, 93.0, 99.0)
+        val e = LiveRemEstimator.estimate(awake, floor, t, minutesAsleep = 300)
+        assertTrue("an awake wrist must be refused outright, not scored: $e", e is Estimate.Unavailable)
+    }
+
+    @Test
+    fun `a genuine REM elevation still reads as REM`() {
+        // The ceiling must not clip real REM. These are the elevations actually observed during scored
+        // REM on this user's nights — 9 to 18 bpm over the floor — and they must still produce a Read.
+        val t = template()!!
+        val floor = 41.0
+        for (elev in listOf(9.0, 13.0, 18.0, 24.0)) {
+            val hr = List(12) { floor + elev + (it % 3) - 1 }
+            val e = LiveRemEstimator.estimate(hr, floor, t, minutesAsleep = 300)
+            assertTrue("elevation of $elev bpm must still be scorable, got $e", e is Estimate.Read)
+        }
+    }
+
+    @Test
     fun `no floor anywhere still means no answer`() {
         // The fallback must not become a licence to invent one: with neither a measured nor a learned
         // floor there is nothing to measure elevation against, and nothing is the right answer.

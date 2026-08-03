@@ -233,6 +233,25 @@ object LiveRemEstimator {
         // Score each feature by which learned class it sits closer to, on a -1..+1 axis where +1 is
         // squarely REM. Using the midpoint between the two learned means as the decision point keeps
         // this self-calibrating: it needs no absolute bpm constants at all.
+        // A reading far ABOVE the REM class is not more-REM-than-REM. It is being awake.
+        //
+        // [classAxis] clamps to +1, so the scale has no top: 45 bpm over the sleeping floor scores
+        // exactly the same as the ~16 bpm that actually marks this sleeper's REM. That is not a
+        // theoretical hole. On the first night a cue ever fired it fired twice at 10am, against a heart
+        // rate of 85-102 over a floor of 41, because a bedtime mark had been left open — and being
+        // awake outscored every genuine REM period of that night (61-78% against 54-55%).
+        //
+        // Removing automatic sleep detection removed the only thing that had implicitly bounded this,
+        // so the ceiling has to live here. It is taken from the learned template rather than picked: the
+        // two sleep classes sit (rem - nonRem) apart, and three of those separations above the REM mean
+        // is far outside anything sleep produces while leaving a strong REM burst plenty of room. On
+        // this user's template that is ~34 bpm over the floor, against real REM at 9-18 and an awake
+        // wrist at 44-61.
+        val classGap = (template.remElevationBpm - template.nonRemElevationBpm).coerceAtLeast(1.0)
+        if (elevation > template.remElevationBpm + 3.0 * classGap) {
+            return Estimate.Unavailable("Heart rate is too high for sleep — this looks like being awake.")
+        }
+
         val elevScore = classAxis(elevation, template.nonRemElevationBpm, template.remElevationBpm)
         val instScore = classAxis(instability, template.nonRemInstabilityBpm, template.remInstabilityBpm)
 
