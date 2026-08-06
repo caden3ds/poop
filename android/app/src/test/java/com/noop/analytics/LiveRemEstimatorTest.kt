@@ -95,7 +95,24 @@ class LiveRemEstimatorTest {
         // ~85-100 bpm over a 41 bpm floor: the real figures from that morning.
         val awake = listOf(85.0, 92.0, 102.0, 97.0, 88.0, 95.0, 100.0, 90.0, 93.0, 99.0)
         val e = LiveRemEstimator.estimate(awake, floor, t, minutesAsleep = 300)
-        assertTrue("an awake wrist must be refused outright, not scored: $e", e is Estimate.Unavailable)
+        assertTrue("an awake wrist must read as Awake, not be scored: $e", e is Estimate.Awake)
+    }
+
+    @Test
+    fun `the WAKING RAMP is caught, not just a settled high heart rate`() {
+        // The elevation ceiling alone was half a fix. Waking is a RAMP — heart rate climbs over a
+        // couple of minutes — so the window MEAN stays modest while its spread explodes, and
+        // instability carries 0.6 of the score against elevation's 0.4. These are the real readings
+        // from the morning it was found: 50 bpm climbing to 113 over one window, mean elevation ~30
+        // (under the elevation ceiling), while confidence climbed 55% -> 63% -> 76% and cued.
+        val t = template()!!
+        val ramp = listOf(50.0, 52.0, 55.0, 57.0, 69.0, 78.0, 90.0, 101.0, 108.0, 113.0)
+        val mean = ramp.average()
+        val e = LiveRemEstimator.estimate(ramp, 40.0, t, minutesAsleep = 420)
+        assertTrue(
+            "a waking ramp (window mean ${mean.toInt()} bpm over a 40 bpm floor) must read Awake: $e",
+            e is Estimate.Awake,
+        )
     }
 
     @Test

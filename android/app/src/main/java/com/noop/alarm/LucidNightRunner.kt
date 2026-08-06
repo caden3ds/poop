@@ -169,6 +169,27 @@ class LucidNightRunner(
             minutesAsleep = minutesAsleep,
         )
 
+        // AWAKE stands the night down immediately, and clears the smoothing window with it.
+        //
+        // This must happen BEFORE the smoothing, and it must CLEAR rather than merely stop adding. The
+        // window holds ten minutes of history at roughly one sample a second; feeding it a single
+        // refusal — or nothing at all — leaves thousands of pre-waking samples still averaging above
+        // the threshold, so a period opened while genuinely asleep survives right through waking up.
+        // That is exactly how a cue fired at 08:06 against a heart rate of 113. Being awake is not a
+        // low REM probability, it is a different state, so the period ends here.
+        if (estimate is LiveRemEstimator.Estimate.Awake) {
+            recentConfidence.clear()
+            remPeriodStartMs = null
+            lastInRemMs = null
+            return Tick(
+                cue = null,
+                nextState = working,
+                arousalStoodDown = false,
+                holdReason = estimate.reason,
+                remConfidence = null,
+            )
+        }
+
         // Smooth BEFORE thresholding. `Estimate.Read.inRem` is the estimator's own per-tick verdict; it
         // is deliberately ignored here in favour of the same comparison against a smoothed confidence,
         // so the threshold is applied once, to a signal that can actually hold a period together.

@@ -346,6 +346,7 @@ private fun LucidLiveTestCard(vm: AppViewModel) {
             // 3. The verdict, with its own caveat attached.
             val read = estimate as? LiveRemEstimator.Estimate.Read
             val unavailable = estimate as? LiveRemEstimator.Estimate.Unavailable
+            val awake = estimate as? LiveRemEstimator.Estimate.Awake
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 LucidStat(
                     Modifier.weight(1f),
@@ -368,6 +369,10 @@ private fun LucidLiveTestCard(vm: AppViewModel) {
                 when {
                     estimate == null ->
                         "Collecting heart rate… needs ${LiveRemEstimator.MIN_LIVE_SAMPLES} readings."
+                    // Sitting here reading this IS the awake case, so it is the expected verdict for a
+                    // live test — and seeing it fire is the useful part: it is the guard that stops a
+                    // cue landing while you are up.
+                    awake != null -> "${awake.reason} That is the wake guard doing its job."
                     unavailable != null -> unavailable.reason
                     read != null && read.inRem ->
                         "Over the ${(LiveRemEstimator.CUE_THRESHOLD * 100).roundToInt()}% threshold. " +

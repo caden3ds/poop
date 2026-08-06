@@ -120,6 +120,16 @@ object LiveRemEstimator {
                     abs(remInstabilityBpm - nonRemInstabilityBpm) >= MIN_INSTABILITY_SEPARATION)
     }
 
+    /**
+     * How many REM-vs-non-REM class separations above the REM mean a feature may reach before the
+     * reading is called wake rather than REM.
+     *
+     * Both feature axes CLAMP at +1 (see [classAxis]), so without a ceiling the scale has no top and
+     * anything above the REM mean scores as maximally REM. Three separations is far outside what sleep
+     * produces on either axis while leaving a strong REM burst room to breathe.
+     */
+    const val WAKE_CEILING_SEPARATIONS: Double = 3.0
+
     /** Minimum learned gap (bpm) between REM and non-REM on a feature for it to count as separating. */
     const val MIN_ELEVATION_SEPARATION: Double = 1.5
     const val MIN_INSTABILITY_SEPARATION: Double = 0.8
@@ -139,6 +149,17 @@ object LiveRemEstimator {
 
         /** Not enough to answer. [reason] is user-showable, and says what is missing. */
         data class Unavailable(val reason: String) : Estimate
+
+        /**
+         * The sleeper is not asleep. A POSITIVE finding, deliberately separate from [Unavailable].
+         *
+         * "No evidence" and "evidence of the opposite" must not share a branch. A missing floor or a
+         * thin stream means the caller should wait; this means it should stand down and drop whatever
+         * REM period it thought it had. Folding this into Unavailable is what let a cue fire at 08:06
+         * one morning: the refusal added nothing to the caller's smoothing window, so the window kept
+         * serving ten minutes of pre-waking confidence and the cue went off against a heart rate of 113.
+         */
+        data class Awake(val reason: String) : Estimate
     }
 
     /**
@@ -247,9 +268,20 @@ object LiveRemEstimator {
         // is far outside anything sleep produces while leaving a strong REM burst plenty of room. On
         // this user's template that is ~34 bpm over the floor, against real REM at 9-18 and an awake
         // wrist at 44-61.
-        val classGap = (template.remElevationBpm - template.nonRemElevationBpm).coerceAtLeast(1.0)
-        if (elevation > template.remElevationBpm + 3.0 * classGap) {
-            return Estimate.Unavailable("Heart rate is too high for sleep — this looks like being awake.")
+        val elevGap = (template.remElevationBpm - template.nonRemElevationBpm).coerceAtLeast(1.0)
+        if (elevation > template.remElevationBpm + WAKE_CEILING_SEPARATIONS * elevGap) {
+            return Estimate.Awake("Heart rate is too high for sleep — this looks like being awake.")
+        }
+        // The SAME ceiling on instability, and it is the one that actually matters.
+        //
+        // Bounding elevation alone was half a fix. Waking up is a RAMP: heart rate climbs 50 -> 113 over
+        // a couple of minutes, so the window's MEAN stays modest while its spread explodes — and
+        // instability carries 0.6 of the score against elevation's 0.4. On the morning this was found,
+        // confidence climbed 55% -> 63% -> 76% as the sleeper woke, sailing under the elevation ceiling
+        // the whole way, and cued at 76%.
+        val instGap = (template.remInstabilityBpm - template.nonRemInstabilityBpm).coerceAtLeast(1.0)
+        if (instability > template.remInstabilityBpm + WAKE_CEILING_SEPARATIONS * instGap) {
+            return Estimate.Awake("Heart rate is swinging too much for sleep — this looks like waking up.")
         }
 
         val elevScore = classAxis(elevation, template.nonRemElevationBpm, template.remElevationBpm)

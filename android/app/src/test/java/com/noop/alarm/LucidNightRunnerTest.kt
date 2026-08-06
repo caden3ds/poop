@@ -223,6 +223,32 @@ class LucidNightRunnerTest {
     }
 
     @Test
+    fun `waking ends the period instead of riding the smoothing window out`() {
+        // The cue that fired at 08:06 did so because a refusal added NOTHING to the smoothing window,
+        // which kept averaging ten minutes of pre-waking confidence. So it is not enough for the
+        // estimator to say "awake" — the runner has to drop the period and the window with it.
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+        // Build a REM period the honest way first.
+        for (i in 0 until 25) {
+            val tick = runner.onHeartRate(
+                hr = remPattern[i % remPattern.size], nowMs = i * minute, floorBpm = 45,
+                template = template, minutesAsleep = 400, state = state, enabled = true,
+            )
+            state = tick.nextState
+        }
+        // Now wake up, hard. Every subsequent tick must refuse, and must never cue.
+        for (i in 25 until 45) {
+            val tick = runner.onHeartRate(
+                hr = 110, nowMs = i * minute, floorBpm = 45,
+                template = template, minutesAsleep = 400 + i, state = state, enabled = true,
+            )
+            state = tick.nextState
+            assertNull("waking must never cue (tick $i)", tick.cue)
+        }
+    }
+
+    @Test
     fun `a single spiking tick cannot open a REM period`() {
         // The defect this smoothing exists for: one noisy reading used to clear the threshold on its
         // own and open a period. Feed a long calm stretch with ONE REM-like burst — the ten-minute mean
@@ -252,14 +278,15 @@ class LucidNightRunnerTest {
         var last: Double? = null
         for (i in 0 until 12) {
             val tick = runner.onHeartRate(
-                hr = if (i % 2 == 0) 80 else 46, nowMs = i * minute, floorBpm = 45,
+                // A REM-like wobble, NOT a 34 bpm swing: that would now (correctly) read as waking.
+                hr = if (i % 2 == 0) 58 else 50, nowMs = i * minute, floorBpm = 45,
                 template = template, minutesAsleep = 200, state = state, enabled = true,
             )
             state = tick.nextState
             last = tick.remConfidence
         }
         assertNotNull(last)
-        // Alternating high/low HR: a raw tick would sit at one extreme, the mean lands between them.
+        // Alternating HR within the sleep range: a raw tick sits at one extreme, the mean between them.
         assertTrue("smoothed confidence must not be pinned at an extreme: $last", last!! > 0.0 && last < 1.0)
     }
 
