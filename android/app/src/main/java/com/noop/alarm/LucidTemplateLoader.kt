@@ -21,6 +21,9 @@ object LucidTemplateLoader {
     /** Cap on nights folded in — recent enough to reflect current physiology. */
     const val MAX_NIGHTS = 14
 
+    /** Longest span still treated as one night when learning. See the filter in [load]. */
+    private const val MAX_PLAUSIBLE_NIGHT_S = 12L * 3600L
+
     /** What a load attempt found, so a caller can explain a null rather than just showing nothing. */
     data class Result(
         val template: LiveRemEstimator.RemTemplate?,
@@ -39,6 +42,19 @@ object LucidTemplateLoader {
         val fromS = nowS - LOOKBACK_DAYS * 86_400L
         val sessions = repo.sleepSessionsMerged(strapId, fromS, nowS, limit = 200)
             .filter { !it.stagesJSON.isNullOrBlank() }
+            // Drop implausibly long "nights" before they can teach anything.
+            //
+            // A forgotten wake mark logged one night as 01:51 -> 21:49 — twenty hours, of which the
+            // last twelve were the user awake and walking around. The stager dutifully labelled ~900
+            // minutes of daytime as sleep stages, including 272 minutes of "REM", and the template
+            // learned its REM class partly from that. Backtested over ten nights the damage is
+            // measurable: with that night included the estimator produces 9 cues at 67% accuracy,
+            // without it 26 cues at 81% — which matches the roughly one-cue-a-night that was actually
+            // observed, and is very likely why almost nothing fired.
+            //
+            // The bound is the same one the night clock uses, for the same reason: past it, this is not
+            // a night, it is a mark someone forgot to close.
+            .filter { it.endTs - it.startTs <= MAX_PLAUSIBLE_NIGHT_S }
             .takeLast(MAX_NIGHTS)
         if (sessions.isEmpty()) return Result(null, 0, 0)
 
