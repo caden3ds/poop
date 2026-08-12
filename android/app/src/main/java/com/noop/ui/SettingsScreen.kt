@@ -522,7 +522,6 @@ fun SettingsScreen(
     }
     // Effort display scale (#268) — show NOOP's native 0–100 Effort or WHOOP's 0–21 Day Strain axis.
     // Display-only; the stored value never changes. Mirrors into local state like the toggles above.
-    var effortScale by remember { mutableStateOf(UnitPrefs.effortScale(context)) }
 
 
     var hrvWindow by remember { mutableStateOf(UnitPrefs.hrvWindow(context)) }
@@ -906,20 +905,6 @@ fun SettingsScreen(
                         onSelect = {
                             temperatureRaw = it
                             NoopPrefs.setTemperatureUnit(context, TemperatureUnit.fromRaw(it))
-                        },
-                    )
-                }
-                RowDivider()
-                // Effort scale (#268) — NOOP's native 0–100 Effort or WHOOP's 0–21 Day Strain axis.
-                // Display-only; the stored value never changes, so a flip just re-labels every read-out.
-                FormRow(label = uiString(R.string.l10n_settings_screen_effort_scale_81afa9ef)) {
-                    SegmentedPillControl(
-                        items = listOf(EffortScale.HUNDRED, EffortScale.WHOOP),
-                        selection = effortScale,
-                        label = { if (it == EffortScale.HUNDRED) "0-100" else "0-21" },
-                        onSelect = {
-                            effortScale = it
-                            UnitPrefs.setEffortScale(context, it)
                         },
                     )
                 }

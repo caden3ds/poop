@@ -62,13 +62,13 @@ import kotlin.math.roundToInt
  * "(avg X vs Y)" prints stored 0-100 Effort means, so the 0-21 toggle rescales them for
  * display only. 1.0 leaves every sentence byte-identical to the pre-toggle output.
  */
-internal fun effortDisplayFactor(scale: EffortScale): Double =
-    if (scale == EffortScale.WHOOP) UnitFormatter.EFFORT_SCALE_FACTOR else 1.0
+/** Effort is stored 0–100 and always shown 0–21; this is that conversion for the digest's own means. */
+internal fun effortDisplayFactor(): Double = UnitFormatter.EFFORT_SCALE_FACTOR
 
 /**
  * Build the weekly digest for the week containing today's logical local day from a
  * [DailyMetric] history. Extracts each metric into a day→value map and hands it to the
- * pure engine. [effortDisplayFactor] follows the Effort display-scale toggle so the
+ * pure engine. [effortDisplayFactor] converts Effort onto its 0–21 display scale so the
  * engine's focal sentences quote Effort on the scale the user reads everywhere else.
  */
 fun buildWeeklyDigest(
@@ -111,7 +111,7 @@ fun buildWeeklyDigest(
 @Composable
 fun WeeklyDigestCard(vm: AppViewModel, modifier: Modifier = Modifier) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
-    val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
+    val factor = UnitFormatter.EFFORT_SCALE_FACTOR
     val digest = buildWeeklyDigest(days, effortDisplayFactor = factor)
     if (digest.isEmpty) return
     NoopCard(modifier = modifier) {
@@ -125,7 +125,7 @@ fun WeeklyDigestCard(vm: AppViewModel, modifier: Modifier = Modifier) {
 @Composable
 fun WeeklyDigestScreen(vm: AppViewModel) {
     val days by vm.recentDays.collectAsStateWithLifecycle()
-    val factor = effortDisplayFactor(UnitPrefs.effortScale(LocalContext.current))
+    val factor = UnitFormatter.EFFORT_SCALE_FACTOR
     ScreenScaffold(title = uiString(R.string.l10n_weekly_digest_card_week_in_review_66d95a07), subtitle = "Your Monday-to-Sunday, read in one glance.") {
         val digest = buildWeeklyDigest(days, effortDisplayFactor = factor)
         if (digest.isEmpty) {
@@ -159,7 +159,6 @@ fun WeeklyDigestContent(digest: WeeklyDigest, compact: Boolean = false) {
     // #268/#463: the Effort row follows the Effort display-scale toggle like every other Effort
     // read-out in the app (Swift's DigestScoreCard already does). Read once here, threaded to the
     // rows, so a 0-21 user can't see "Effort 22" beside a Trends chart reading 4.6.
-    val effortScale = UnitPrefs.effortScale(LocalContext.current)
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Header.
         Row(
@@ -193,7 +192,7 @@ fun WeeklyDigestContent(digest: WeeklyDigest, compact: Boolean = false) {
         val rows = (if (compact) listOf(WeeklyMetric.CHARGE, WeeklyMetric.EFFORT, WeeklyMetric.REST)
         else DISPLAY_ORDER).mapNotNull { digest.summary(it) }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            rows.forEach { MetricRow(it, effortScale) }
+            rows.forEach { MetricRow(it) }
         }
 
         if (!compact) {
@@ -235,11 +234,11 @@ private fun FocalRow(line: String) {
 }
 
 @Composable
-private fun MetricRow(s: WeeklyMetricSummary, effortScale: EffortScale) {
+private fun MetricRow(s: WeeklyMetricSummary) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .semantics(mergeDescendants = true) { contentDescription = rowAccessibility(s, effortScale) },
+            .semantics(mergeDescendants = true) { contentDescription = rowAccessibility(s) },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -250,7 +249,7 @@ private fun MetricRow(s: WeeklyMetricSummary, effortScale: EffortScale) {
             modifier = Modifier.width(92.dp),
         )
         Text(
-            meanText(s, effortScale),
+            meanText(s),
             style = NoopType.bodyNumber,
             color = Palette.textPrimary,
             // 84 (was 64) so the Effort scale read-out ("21.6 / 100") fits on one line.
@@ -294,13 +293,13 @@ private fun shortDate(ymd: String): String {
     return "$name ${p[2]}"
 }
 
-internal fun meanText(s: WeeklyMetricSummary, effortScale: EffortScale): String {
+internal fun meanText(s: WeeklyMetricSummary): String {
     if (s.thisWeek.n == 0) return "—"
     // #463: Effort is STORED 0-100; render it on the user's chosen display scale WITH the denominator
     // ("4.6 / 21", "21.6 / 100") so the card can't read as a different number than the Trends chart.
     if (s.metric == WeeklyMetric.EFFORT) {
-        return "${UnitFormatter.effortDisplay(s.thisWeek.mean, effortScale)} / " +
-            UnitFormatter.effortScaleMax(effortScale)
+        return "${UnitFormatter.effortDisplay(s.thisWeek.mean)} / " +
+            UnitFormatter.effortScaleMax()
     }
     val v = s.thisWeek.mean.roundToInt()
     return if (s.metric.unit.isEmpty()) "$v" else "$v ${s.metric.unit}"
@@ -327,8 +326,8 @@ private fun chipTone(s: WeeklyMetricSummary): Color = when {
     else -> Palette.textTertiary
 }
 
-private fun rowAccessibility(s: WeeklyMetricSummary, effortScale: EffortScale): String {
-    val mean = meanText(s, effortScale)
+private fun rowAccessibility(s: WeeklyMetricSummary): String {
+    val mean = meanText(s)
     if (s.weekOverWeek.current.n == 0 || s.weekOverWeek.previous.n == 0) {
         return "${s.metric.label}: $mean this week, no comparison."
     }

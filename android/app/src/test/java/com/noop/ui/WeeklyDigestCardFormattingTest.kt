@@ -48,42 +48,35 @@ class WeeklyDigestCardFormattingTest {
         )
     }
 
-    // ── meanText: the Effort scale toggle ───────────────────────────────────────
+    // ── meanText: Effort is stored 0–100 and always shown 0–21 ──────────────────
 
-    @Test fun effortMeanOnTheNativeScaleShowsValueOutOf100() {
+    @Test fun effortMeanConvertsToTheZeroTwentyOneScale() {
+        // 21.6 stored × 0.21 = 4.536 → "4.5". There is no longer a 0–100 reading to choose instead.
         val s = summary(WeeklyMetric.EFFORT, thisMean = 21.6, thisN = 5, prevMean = 20.0, prevN = 5)
-        assertEquals("21.6 / 100", meanText(s, EffortScale.HUNDRED))
-    }
-
-    @Test fun effortMeanOnTheWhoopScaleConvertsAndShowsOutOf21() {
-        // 21.6 stored × 0.21 = 4.536 → "4.5" on the 0-21 display scale.
-        val s = summary(WeeklyMetric.EFFORT, thisMean = 21.6, thisN = 5, prevMean = 20.0, prevN = 5)
-        assertEquals("4.5 / 21", meanText(s, EffortScale.WHOOP))
+        assertEquals("4.5 / 21", meanText(s))
     }
 
     @Test fun effortCeilingMapsToTheScaleCeiling() {
         val s = summary(WeeklyMetric.EFFORT, thisMean = 100.0, thisN = 7, prevMean = 90.0, prevN = 7)
-        assertEquals("21.0 / 21", meanText(s, EffortScale.WHOOP))
-        assertEquals("100.0 / 100", meanText(s, EffortScale.HUNDRED))
+        assertEquals("21.0 / 21", meanText(s))
     }
 
-    @Test fun nonEffortMeansAreUntouchedByTheToggle() {
+    @Test fun nonEffortMeansAreUnaffectedByTheEffortConversion() {
         val charge = summary(WeeklyMetric.CHARGE, thisMean = 70.4, thisN = 5, prevMean = 68.0, prevN = 5)
-        assertEquals("70", meanText(charge, EffortScale.WHOOP))
+        assertEquals("70", meanText(charge))
         val rhr = summary(WeeklyMetric.RHR, thisMean = 58.2, thisN = 5, prevMean = 57.0, prevN = 5)
-        assertEquals("58 bpm", meanText(rhr, EffortScale.WHOOP))
+        assertEquals("58 bpm", meanText(rhr))
     }
 
     @Test fun emptyWeekMeanIsADash() {
         val s = summary(WeeklyMetric.EFFORT, thisMean = 0.0, thisN = 0, prevMean = 40.0, prevN = 5)
-        assertEquals("—", meanText(s, EffortScale.HUNDRED))
+        assertEquals("—", meanText(s))
     }
 
     // ── the engine's Effort display factor for focal sentences ──────────────────
 
-    @Test fun effortDisplayFactorFollowsTheScaleToggle() {
-        assertEquals(1.0, effortDisplayFactor(EffortScale.HUNDRED), 0.0)
-        assertEquals(UnitFormatter.EFFORT_SCALE_FACTOR, effortDisplayFactor(EffortScale.WHOOP), 0.0)
+    @Test fun effortDisplayFactorIsTheZeroTwentyOneConversion() {
+        assertEquals(UnitFormatter.EFFORT_SCALE_FACTOR, effortDisplayFactor(), 0.0)
     }
 
     // ── deltaText: the sub-1% fallback ──────────────────────────────────────────

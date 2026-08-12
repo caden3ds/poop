@@ -20,7 +20,7 @@ class ChartSelectionLabelTest {
     }
 
     @Test fun aSuppliedFormatterOwnsTheLabel() {
-        val toWhoopScale: (Double) -> String = { UnitFormatter.effortDisplay(it, EffortScale.WHOOP) }
+        val toWhoopScale: (Double) -> String = { UnitFormatter.effortDisplay(it) }
         // The stored 13 renders as 2.7 on the 0-21 display scale, matching the axis column.
         assertEquals("2.7", lineChartSelectionLabel(13.0, toWhoopScale))
     }

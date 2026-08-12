@@ -121,9 +121,6 @@ object BackupSettingsBridge {
         if (noop.contains(NoopPrefs.KEY_TEMPERATURE_UNIT)) {
             noop.getString(NoopPrefs.KEY_TEMPERATURE_UNIT, null)?.let { values["units.temperature"] = it }
         }
-        if (noop.contains(UnitPrefs.KEY_EFFORT_SCALE)) {
-            noop.getString(UnitPrefs.KEY_EFFORT_SCALE, null)?.let { values["effort.scale"] = it }
-        }
         return BackupSettingsCodec.encode(values)
     }
 
@@ -146,7 +143,8 @@ object BackupSettingsBridge {
             if (raw.isEmpty()) editor.remove(NoopPrefs.KEY_TEMPERATURE_UNIT)
             else editor.putString(NoopPrefs.KEY_TEMPERATURE_UNIT, raw)
         }
-        (values["effort.scale"] as? String)?.let { editor.putString(UnitPrefs.KEY_EFFORT_SCALE, it) }
+        // "effort.scale" is deliberately not restored: the 0–100/0–21 choice no longer exists, and
+        // Effort is always shown on the 0–21 axis. An older backup carrying the key is simply ignored.
         editor.apply()
     }
 }

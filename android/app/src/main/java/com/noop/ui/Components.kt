@@ -1019,7 +1019,7 @@ fun RecoveryRing(
 // passed [strain] is ON (default 21, WHOOP's Day-Strain axis). The Effort hero passes the value already
 // converted to the user's selected display scale (#313) plus its matching max (100 or 21) and an optional
 // [valueText] override for the centre numeral, so the arc, number and caption all read on one scale rather
-// than being hardcoded to 0–21. Stays scale-agnostic — the caller owns the conversion (EffortScale is an
+// than being hardcoded. Stays scale-agnostic — the caller owns the conversion (the display factor is an
 // app concern). Mirrors StrandDesign's StrainGauge so the hero row reads as three matched instruments
 // (Charge gold · Effort amber · Rest blue).
 

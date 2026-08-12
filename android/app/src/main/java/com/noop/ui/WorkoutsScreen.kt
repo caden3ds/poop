@@ -651,14 +651,13 @@ private fun EffortHero(
     effectiveRange: WorkoutRange,
     groups: List<SportGroup>,
 ) {
-    val effortScale = UnitPrefs.effortScale(LocalContext.current)
     val strains = rows.mapNotNull { it.strain }
     val hasEffort = strains.isNotEmpty()
     val avgStrain = if (strains.isEmpty()) 0.0 else strains.sum() / strains.size
     // Fill fraction on the stored 0–100 Effort axis — scale-independent, so the vessel fills the same on
     // either display scale. The count-up number below tracks the user's chosen scale.
     val fraction = (avgStrain / 100.0).coerceIn(0.0, 1.0)
-    val shownEffort = UnitFormatter.effortValue(avgStrain, effortScale)
+    val shownEffort = UnitFormatter.effortValue(avgStrain)
     val totalTimeH = rows.mapNotNull { it.durationS }.sum() / 3600.0
     val modal = groups.firstOrNull()
 
@@ -1341,9 +1340,8 @@ private fun WorkoutDetailSheet(vm: AppViewModel, row: WorkoutRow, onDismiss: () 
             // scale toggle (#268), so a WHOOP-axis user sees the rescaled 0–21 value; the stored value is
             // unchanged. Presentation only - no new data is computed here.
             row.strain?.let { strain ->
-                val effortScale = UnitPrefs.effortScale(LocalContext.current)
                 CardDivider()
-                SessionEffortCard(strain = strain, effortScale = effortScale)
+                SessionEffortCard(strain = strain)
             }
 
             // HR curve over the session window (#410). A faint baseline shows under 2 points.
@@ -1604,11 +1602,11 @@ private fun RecoveryTrendChart(
  * carries a "This session" overline, the captured strain as a big count-up value (the POOP signature),
  * its scale caption (Effort 0–100 or strain 0–21), and a one-line explainer. Mirrors the iOS
  * WorkoutDetailView.effortCard: same colour world, same count-up, same copy. [strain] is the stored
- * 0–100 Effort value; [effortScale] only changes how it is DISPLAYED, never the stored number.
+ * 0–100 Effort value, shown on the 0–21 scale — the display converts, the stored number never does.
  */
 @Composable
-private fun SessionEffortCard(strain: Double, effortScale: EffortScale) {
-    val shown = UnitFormatter.effortValue(strain, effortScale)
+private fun SessionEffortCard(strain: Double) {
+    val shown = UnitFormatter.effortValue(strain)
     Column(verticalArrangement = Arrangement.spacedBy(Metrics.space8)) {
         SectionHeader("Effort", overline = "This session")
         NoopCard(tint = Palette.effortColor) {
@@ -1621,7 +1619,7 @@ private fun SessionEffortCard(strain: Double, effortScale: EffortScale) {
                     modifier = Modifier.semantics {
                         contentDescription =
                             uiString(R.string.l10n_workouts_screen_this_session_s_effort_onedecimal_shown_74eed8be, oneDecimal(shown)) +
-                                (if (effortScale == EffortScale.WHOOP) "0 to 21 strain" else "0 to 100 Effort") +
+                                "0 to 21 strain" +
                                 " scale."
                     },
                 ) {
@@ -1632,7 +1630,7 @@ private fun SessionEffortCard(strain: Double, effortScale: EffortScale) {
                         color = Palette.effortBright,
                     )
                     Text(
-                        if (effortScale == EffortScale.WHOOP) "strain (0-21)" else "Effort (0-100)",
+                        "strain (0-21)",
                         style = NoopType.footnote,
                         color = Palette.textTertiary,
                     )

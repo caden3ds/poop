@@ -111,7 +111,6 @@ fun LiveScreen(
     val context = LocalContext.current
     val unitSystem = UnitPrefs.system(context)
     // Effort display scale (#268) — routes the live + saved workout Effort read-outs. Display-only.
-    val effortScale = UnitPrefs.effortScale(context)
 
     // The runtime Bluetooth permission gates scanning. If it isn't granted, the Connect button
     // REQUESTS it (rather than silently doing nothing), then connects once allowed. Shared with
@@ -360,7 +359,7 @@ fun LiveScreen(
                             accent = if (bpm == null) Palette.textPrimary else Palette.metricRose)
                         StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_avg_cdc93143), value = if (w.avgHr > 0) "${w.avgHr}" else "—")
                         StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "—")
-                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain, effortScale),
+                        StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain),
                             accent = Palette.strainColor(w.liveStrain))
                     }
                     if (w.gpsEnabled) {
@@ -421,7 +420,7 @@ fun LiveScreen(
                     "$mins min",
                     row.distanceM?.let { liveDistance(it, unitSystem) },
                     row.avgHr?.let { "$it avg bpm" },
-                    row.strain?.let { "strain ${UnitFormatter.effortDisplay(it, effortScale)}" },
+                    row.strain?.let { "strain ${UnitFormatter.effortDisplay(it)}" },
                 )
                 Text(
                     uiString(R.string.live_workout_saved_summary, row.sport, parts.joinToString(" · ")),

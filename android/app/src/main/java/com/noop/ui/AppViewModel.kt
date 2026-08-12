@@ -1454,15 +1454,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      *  and hand it to the notifier, which applies the strictly-newer gate. avgHr is omitted when absent —
      *  never invented. No-op when the toggle is off (gated inside the notifier). */
     private fun maybeNotifyWorkout(row: WorkoutRow) {
-        // Effort is the workout's stored 0–100 strain, shown on the user's chosen scale (0–100 or 0–21).
-        // A session with no scored strain still gets a summary (duration + HR), but without an Effort line.
-        val scale = UnitPrefs.effortScale(appContext)
+        // Effort is the workout's stored 0–100 strain, shown on the 0–21 scale. A session with no
+        // scored strain still gets a summary (duration + HR), but without an Effort line.
         val durMin = ((row.durationS ?: (row.endTs - row.startTs).toDouble()) / 60.0).roundToInt()
         val (title, body) = if (row.strain != null) {
             ScheduledReportPolicy.workoutCopy(
                 sportLabel = WorkoutEditing.displaySport(row.sport),
-                effortDisplay = UnitFormatter.effortDisplay(row.strain, scale),
-                effortMaxLabel = UnitFormatter.effortScaleMax(scale),
+                effortDisplay = UnitFormatter.effortDisplay(row.strain),
+                effortMaxLabel = UnitFormatter.effortScaleMax(),
                 durationLabel = ScheduledReportPolicy.durationLabel(durMin),
                 avgHr = row.avgHr,
             )

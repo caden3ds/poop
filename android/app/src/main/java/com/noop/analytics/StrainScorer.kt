@@ -62,14 +62,28 @@ object StrainScorer {
     const val maxStrain: Double = 100.0
 
     /**
-     * Logarithmic-map denominator D. Chosen so the Edwards daily ceiling
-     * (top zone weight 5 sustained 24 h = 7200) maps to exactly maxStrain:
-     * D = 7200 + 1 = 7201 makes ln(7201)/ln(7201) = 1, so the curve shape and
-     * its saturation point are independent of maxStrain (the 21→100 rescale is a
-     * pure linear scaling of the whole curve).
+     * Load scale of the strain curve (TRIMP), and its multiplier.
+     *
+     * strain = [strainCurveC] × ln(1 + TRIMP / [strainCurveT0]), clamped to [maxStrain].
+     *
+     * REPLACES a single-parameter map, 100 × ln(TRIMP+1) / ln(7201), whose denominator was the Edwards
+     * 24-hour ceiling. That form has only one free parameter, and with a denominator that large it
+     * crushed every realistic day into a five-point band: bed-bound scored 10.7 and an all-out day
+     * 15.5, on a scale of 21. Two parameters let both ends be placed.
+     *
+     * The two anchors are day archetypes, integrated minute by minute through the same Banister
+     * weighting the scorer uses (see the accompanying test, which recomputes them):
+     *
+     *   a genuinely restful day  (~86 TRIMP)  ->  6
+     *   an all-out day, 2 h hard (~638 TRIMP) -> 19
+     *
+     * Which yields the property this scale is supposed to have — each further point costs more than
+     * the last. Going 6 -> 9 takes about 69 TRIMP; 15 -> 18 takes about 182.
+     *
+     * Both are expressed on the stored 0–100 axis; the display divides by 100/21.
      */
-    const val strainDenominator: Double = 7201.0
-    val lnStrainDenominator: Double get() = ln(strainDenominator)
+    const val strainCurveT0: Double = 94.71
+    const val strainCurveC: Double = 44.22
 
     /** Fallback per-sample duration (minutes) — 1 s at 1 Hz. */
     const val fallbackSampleMin: Double = 1.0 / 60.0
@@ -204,41 +218,49 @@ object StrainScorer {
     // ---- Logarithmic map ----
 
     /**
-     * Map accumulated TRIMP onto [0, 100] via 100 × ln(TRIMP+1) / ln(D), 2 dp.
-     * TRIMP ≤ 0 → 0.
+     * Map accumulated TRIMP onto [0, maxStrain] via [strainCurveC] × ln(1 + TRIMP/[strainCurveT0]),
+     * clamped, 2 dp. TRIMP ≤ 0 → 0.
      */
-    fun trimpToStrain(trimp: Double, denominator: Double = strainDenominator): Double {
+    fun trimpToStrain(trimp: Double, t0: Double = strainCurveT0, c: Double = strainCurveC): Double {
         if (trimp <= 0) return 0.0
-        val value = maxStrain * ln(trimp + 1.0) / ln(denominator)
+        val value = (c * ln(1.0 + trimp / t0)).coerceAtMost(maxStrain)
         return (value * 100).roundToLong() / 100.0
     }
 
     // ---- Denominator calibration ----
 
     /**
-     * Calibrate D from (TRIMP, reference_strain) pairs via the through-origin
-     * least-squares line: ln(D) = maxStrain × Σ(x²) / Σ(xy), x = ln(TRIMP+1).
-     * Reference strains are on the maxStrain (0–100) scale. Throws [StrainException]
-     * when fewer than 2 usable pairs (TRIMP>0, strain>0) or degenerate.
+     * Fit [strainCurveC] to reference (TRIMP, strain) pairs at a fixed [t0], through the origin.
+     *
+     * Only the multiplier is fitted: with a handful of noisy reference days, fitting the curvature as
+     * well overfits badly, and the curvature is the part carrying the "each point costs more" property
+     * this scale exists for. Throws when fewer than 2 usable pairs (TRIMP>0, strain>0) or degenerate.
      */
-    fun fitStrainDenominator(pairs: List<Pair<Double, Double>>): Double {
+    fun fitStrainCurveC(pairs: List<Pair<Double, Double>>, t0: Double = strainCurveT0): Double {
         val usable = pairs.filter { it.first > 0 && it.second > 0 }
         if (usable.size < 2) throw StrainException(StrainError.TOO_FEW_PAIRS)
         var sumXX = 0.0
         var sumXY = 0.0
         for ((trimp, strain) in usable) {
-            val x = ln(trimp + 1.0)
+            val x = ln(1.0 + trimp / t0)
             sumXX += x * x
             sumXY += x * strain
         }
         if (!(sumXY > 0 && sumXX > 0)) throw StrainException(StrainError.DEGENERATE)
-        return exp(maxStrain * sumXX / sumXY)
+        return sumXY / sumXX
     }
 
     // ---- Public API ----
 
     /**
-     * Cardiovascular Effort (0–100) from an HR series. APPROXIMATE.
+     * Cardiovascular Effort (0–100 stored, shown 0–21) from an HR series. APPROXIMATE.
+     *
+     * Defaults to BANISTER. It used to default to Edwards, whose five integer zone weights start at
+     * 50% of heart-rate reserve — so every heartbeat below that contributed exactly NOTHING. For a
+     * user with a 46 bpm resting rate and a 190 bpm maximum that is a 118 bpm cut-off: an entire day
+     * of walking about scored zero, which is what the Effort tile kept showing. Banister weights
+     * continuously from the first beat above resting and rises exponentially with intensity, so an
+     * ordinary day registers as an ordinary day instead of as nothing.
      *
      * Returns null when there isn't yet enough data to trust the number — fewer than [minReadings]
      * samples AND less than [minSpanSeconds] of HR coverage (the sparse-strap path, #482) — or when
@@ -247,17 +269,19 @@ object StrainScorer {
      * @param hr time-ordered [HrSample] list.
      * @param maxHR HRmax (bpm). Defaults to 220 − defaultAge when null.
      * @param restingHR resting HR (bpm) for the HRR denominator (default 60).
-     * @param method [Method.EDWARDS] (default) or [Method.BANISTER].
+     * @param method [Method.BANISTER] (default) or [Method.EDWARDS].
      * @param sex "male"/"female" — selects the Banister coefficient (ignored by Edwards).
-     * @param denominator log-map D (default [strainDenominator]).
+     * @param t0 load scale of the strain curve (default [strainCurveT0]).
+     * @param c curve multiplier (default [strainCurveC]).
      */
     fun strain(
         hr: List<HrSample>,
         maxHR: Double? = null,
         restingHR: Double = defaultRestingHR,
-        method: Method = Method.EDWARDS,
+        method: Method = Method.BANISTER,
         sex: String = "male",
-        denominator: Double = strainDenominator,
+        t0: Double = strainCurveT0,
+        c: Double = strainCurveC,
     ): Double? {
         val effMax = maxHR ?: defaultMaxHR().toDouble()
         // Enough data to trust the score: a dense stream (≥ minReadings) OR a sparse-but-sustained
@@ -284,6 +308,6 @@ object StrainScorer {
                 edwardsTRIMP(hr, restingHR, hrReserve, sampleDur)
             }
         }
-        return trimpToStrain(trimp, denominator)
+        return trimpToStrain(trimp, t0, c)
     }
 }

@@ -13,8 +13,10 @@ import org.junit.Test
  * yesterday. The resolver must surface the LOCAL-day row in that window, yet keep the #144 anti-blank
  * guard (defer to the logical-day row, never blank, when no night is banked yet).
  *
- * Effort scale: the hero gauge's value + scale-max must follow the EffortScale toggle (#313). Mirrors the
- * Swift TodayResolverEffortScaleTests byte-for-byte in intent.
+ * Today's day-row resolution around the 04:00 boundary.
+ *
+ * This file also carried the Effort display-scale toggle's cases; the toggle was removed (Effort is
+ * always shown 0–21) and they went with it. The resolver cases below are unrelated and still load-bearing.
  */
 class TodayResolverEffortScaleTest {
 
@@ -62,24 +64,7 @@ class TodayResolverEffortScaleTest {
 
     // --- #313 Effort-gauge scale ----------------------------------------------
 
-    @Test
-    fun effortGaugeValue_hundredScale() {
-        assertEquals(63.0, UnitFormatter.effortValue(63.0, EffortScale.HUNDRED), 1e-9)
-        assertEquals("100", UnitFormatter.effortScaleMax(EffortScale.HUNDRED))
-    }
 
-    @Test
-    fun effortGaugeValue_whoopScale() {
-        assertEquals(21.0, UnitFormatter.effortValue(100.0, EffortScale.WHOOP), 1e-9)
-        assertEquals(10.5, UnitFormatter.effortValue(50.0, EffortScale.WHOOP), 1e-9)
-        assertEquals("21", UnitFormatter.effortScaleMax(EffortScale.WHOOP))
-    }
 
     /** The gauge fraction (value / scale-max) is scale-independent — a full-effort day fills both. */
-    @Test
-    fun effortGaugeFraction_consistentAcrossScales() {
-        val hundred = UnitFormatter.effortValue(100.0, EffortScale.HUNDRED) / 100.0
-        val whoop = UnitFormatter.effortValue(100.0, EffortScale.WHOOP) / 21.0
-        assertEquals(hundred, whoop, 1e-9)
-    }
 }

@@ -1616,7 +1616,6 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
     val context = LocalContext.current
     val tempUnit = UnitPrefs.temperature(context)
     // The Effort detail renders per the user's Effort display scale (0-100 vs 0-21), like the Today tile.
-    val effortScale = UnitPrefs.effortScale(context)
     // Profile drives the Fitness Age readiness/countdown shown when that vital has no value yet.
     val profile = remember { ProfileStore.from(context.applicationContext) }
     val isSeriesBacked = key in SERIES_BACKED_VITAL_KEYS
@@ -1637,7 +1636,7 @@ fun VitalDetailScreen(vm: AppViewModel, key: String) {
         }
     }
     val detail = if (isSeriesBacked) seriesDetail
-    else remember(days, key, tempUnit, effortScale) { buildVitalDetail(days, key, tempUnit, effortScale) }
+    else remember(days, key, tempUnit) { buildVitalDetail(days, key, tempUnit) }
     var range by remember { mutableStateOf(VitalDetailRange.MONTH) }
 
     // The subtitle tracks how much history the metric has, so we never promise a "historical trend" the
@@ -1904,7 +1903,6 @@ private fun buildVitalDetail(
     days: List<DailyMetric>,
     key: String,
     tempUnit: TemperatureUnit,
-    effortScale: EffortScale = EffortScale.HUNDRED,
 ): VitalDetailModel? {
     return when (key) {
     // The Today Key-Metrics Recovery tile's drill-in: the Recovery (Charge) trend timeline, matching the
@@ -1922,10 +1920,10 @@ private fun buildVitalDetail(
     "strain" -> VitalDetailModel(
         key = key,
         title = uiString(R.string.l10n_health_screen_effort_8c974bc6),
-        unit = if (effortScale == EffortScale.HUNDRED) "%" else "",
+        unit = "",
         color = Palette.effortColor,
         readings = days.mapNotNull { row -> row.strain?.let { VitalReading(row.day, it, row.deviceId) } },
-        format = { UnitFormatter.effortDisplay(it, effortScale) },
+        format = { UnitFormatter.effortDisplay(it) },
     )
     "resp" -> VitalDetailModel(
         key = key,

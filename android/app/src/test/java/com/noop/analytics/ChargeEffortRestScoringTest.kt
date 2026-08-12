@@ -28,32 +28,26 @@ class ChargeEffortRestScoringTest {
     // ── Effort (StrainScorer 0–100) ────────────────────────────────────────────
 
     @Test
-    fun effort_scaleConstantsAreRescaled() {
-        // The whole rebrand is a pure linear rescale: maxStrain 21→100, denominator unchanged.
+    fun effort_curveConstants() {
         assertEquals(100.0, StrainScorer.maxStrain, 0.0)
-        assertEquals(7201.0, StrainScorer.strainDenominator, 0.0)
+        // The two-anchor curve replaced the single-denominator log map. See StrainCurveTest for why,
+        // and for the day archetypes these constants are solved from.
+        assertEquals(94.71, StrainScorer.strainCurveT0, 0.0)
+        assertEquals(44.22, StrainScorer.strainCurveC, 0.0)
     }
 
     @Test
     fun effort_trimpToStrainMapsOntoZeroHundred() {
-        // 100 × ln(t+1) / ln(7201), 2 dp.
+        // c × ln(1 + t/t0), clamped at maxStrain, 2 dp.
         assertEquals(0.0, StrainScorer.trimpToStrain(0.0), 0.0)
         assertEquals(0.0, StrainScorer.trimpToStrain(-5.0), 0.0) // TRIMP ≤ 0 → 0
-        assertEquals(51.96, StrainScorer.trimpToStrain(100.0), EPS)
-        assertEquals(69.99, StrainScorer.trimpToStrain(500.0), EPS)
-        assertEquals(77.78, StrainScorer.trimpToStrain(1000.0), EPS)
-        assertEquals(92.20, StrainScorer.trimpToStrain(3600.0), EPS)
-        // TRIMP 7200 (Edwards daily ceiling) saturates at the top of the scale.
-        assertEquals(100.0, StrainScorer.trimpToStrain(7200.0), EPS)
-    }
-
-    @Test
-    fun effort_oldGoldensRescaledByHundredOverTwentyOne() {
-        // Every former 0–21 golden is the 0–100 value × 21/100 (within 2-dp rounding).
-        // trimp=1000 was 16.33 on the 0–21 scale → 16.33 × 100/21 ≈ 77.76, our 0–100 value is 77.78.
-        val effort = StrainScorer.trimpToStrain(1000.0)
-        val legacy21 = 21.0 * kotlin.math.ln(1001.0) / kotlin.math.ln(7201.0)
-        assertEquals(legacy21 * (100.0 / 21.0), effort, 0.02)
+        for (t in listOf(100.0, 500.0, 1000.0, 3600.0)) {
+            val expected = (44.22 * kotlin.math.ln(1.0 + t / 94.71)).coerceAtMost(StrainScorer.maxStrain)
+            assertEquals(expected, StrainScorer.trimpToStrain(t), 0.01)
+        }
+        // The curve is monotonic and bounded.
+        assertTrue(StrainScorer.trimpToStrain(500.0) > StrainScorer.trimpToStrain(100.0))
+        assertTrue(StrainScorer.trimpToStrain(1_000_000.0) <= StrainScorer.maxStrain)
     }
 
     /** 600 constant-bpm samples at 1 Hz so Edwards TRIMP = 600·weight·(1/60) = 10·weight. */
@@ -61,26 +55,25 @@ class ChargeEffortRestScoringTest {
         (0 until n).map { HrSample(deviceId = "t", ts = it.toLong(), bpm = bpm) }
 
     @Test
-    fun effort_edwardsZoneGoldens_onZeroHundredScale() {
-        // restingHR 60, maxHR 160 → hrReserve 100 → %HRR = bpm − 60.
-        // zone1 (50–60%): bpm 115 → trimp 10 → 27.00
-        assertEquals(
-            27.0,
-            StrainScorer.strain(hrConstant(115), maxHR = 160.0, restingHR = 60.0)!!,
-            EPS,
-        )
-        // zone3 (70–80%): bpm 135 → trimp 30 → 38.66
-        assertEquals(
-            38.66,
-            StrainScorer.strain(hrConstant(135), maxHR = 160.0, restingHR = 60.0)!!,
-            EPS,
-        )
-        // zone5 (≥90%): bpm 155 → trimp 50 → 44.27
-        assertEquals(
-            44.27,
-            StrainScorer.strain(hrConstant(155), maxHR = 160.0, restingHR = 60.0)!!,
-            EPS,
-        )
+    fun effort_edwardsZoneGoldens_pinTheZoneWeights() {
+        // Edwards is no longer the default (Banister is), so it is requested explicitly. The goldens
+        // now pin the TRIMP its zone weights produce, and assert only that the curve maps them
+        // consistently — the previous form hard-coded curve OUTPUT, which silently encoded the old
+        // single-denominator map and broke the moment the curve was recalibrated.
+        // restingHR 60, maxHR 160 → hrReserve 100 → %HRR = bpm − 60. 600 samples at 1 Hz = 10 min.
+        fun edwardsStrain(bpm: Int) = StrainScorer.strain(
+            hrConstant(bpm), maxHR = 160.0, restingHR = 60.0, method = StrainScorer.Method.EDWARDS,
+        )!!
+        // zone1 (50–60%) weight 1 → trimp 10; zone3 weight 3 → 30; zone5 weight 5 → 50.
+        for ((bpm, trimp) in listOf(115 to 10.0, 135 to 30.0, 155 to 50.0)) {
+            assertEquals(
+                "bpm $bpm must map through the shared curve",
+                StrainScorer.trimpToStrain(trimp), edwardsStrain(bpm), EPS,
+            )
+        }
+        // And the zones stay strictly ordered.
+        assertTrue(edwardsStrain(115) < edwardsStrain(135))
+        assertTrue(edwardsStrain(135) < edwardsStrain(155))
     }
 
     @Test
@@ -111,11 +104,24 @@ class ChargeEffortRestScoringTest {
     }
 
     @Test
-    fun effort_lightDayHonestlyScoresZeroNotFabricated() {
-        // HR below ~50% HRR earns ZERO, by design — the sparse path must not invent load. With
-        // max 184 / rest 60, zone 1 starts at 122 bpm; 105 bpm stays below it on both cadences.
-        assertEquals(0.0, StrainScorer.strain(hrConstant(105, n = 1200), maxHR = 184.0, restingHR = 60.0))
-        assertEquals(0.0, StrainScorer.strain(hrEvery(105, 40), maxHR = 184.0, restingHR = 60.0))
+    fun effort_lightDayScoresSmallButRealLoad() {
+        // REVERSED ON PURPOSE. This used to assert 0.0, because Edwards' zone 1 starts at 50% of
+        // heart-rate reserve (122 bpm here) and everything below earned nothing. That was the defect:
+        // a whole day under the cut-off scored zero. Banister weights from the first beat above
+        // resting, so 105 bpm is now small — not absent — on both cadences.
+        val dense = StrainScorer.strain(hrConstant(105, n = 1200), maxHR = 184.0, restingHR = 60.0)
+        val sparse = StrainScorer.strain(hrEvery(105, 40), maxHR = 184.0, restingHR = 60.0)
+        assertNotNull(dense); assertNotNull(sparse)
+        assertTrue("light activity must register, got $dense", dense!! > 0.0)
+        assertTrue("and stay modest, got $dense", dense < 60.0)
+        assertTrue("the sparse cadence must agree, got $sparse", sparse!! > 0.0)
+    }
+
+    @Test
+    fun effort_atOrBelowRestingStillScoresZero() {
+        // The honesty rule survives: no elevation above resting means no load, and none is invented.
+        assertEquals(0.0, StrainScorer.strain(hrConstant(60, n = 1200), maxHR = 184.0, restingHR = 60.0))
+        assertEquals(0.0, StrainScorer.strain(hrConstant(45, n = 1200), maxHR = 184.0, restingHR = 60.0))
     }
 
     @Test

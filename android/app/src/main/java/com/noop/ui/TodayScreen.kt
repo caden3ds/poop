@@ -356,7 +356,6 @@ fun TodayScreen(
     val context = LocalContext.current
     val unitSystem = UnitPrefs.system(context)
     // Effort display scale (#268), drives the Effort tile's value + caption. Display-only.
-    val effortScale = UnitPrefs.effortScale(context)
     val profileWeightKg = remember { ProfileStore.from(context).weightKg }
     // Body profile for the live Effort computation below, age/sex/HR-max-override drive the same
     // StrainScorer call the daily pass uses. Read once like every other Settings-backed value. (#402)
@@ -1177,7 +1176,6 @@ fun TodayScreen(
                                     restScore = restScoreForDay,
                                     recoveryCalibration = recoveryCalibration,
                                     lastScoredCharge = lastScoredCharge,
-                                    effortScale = effortScale,
                                     liveTodayStrain = if (selectedDayOffset == 0) liveTodayStrain else null,
                                     heroSourceLabel = heroSourceLabel,
                                     onScoreInfo = openGuide,
@@ -1242,7 +1240,6 @@ fun TodayScreen(
                                     carriedDay = lastScoredRecoveryDay,
                                     spo2CarryDay = lastSpo2Day,
                                     unitSystem = unitSystem,
-                                    effortScale = effortScale,
                                     latestWeightKg = weightKg,
                                     profileWeightKg = profileWeightKg,
                                     importedStepsForDay = importedStepsForDay,
@@ -1275,7 +1272,7 @@ fun TodayScreen(
                             modifier = Modifier.fillMaxWidth().staggeredAppear(stagger),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric, effortScale)
+                            HeartRateTrendCard(viewModel, days, selectedDay, todayDate, displayMetric)
                         }
                         // The three hero vitals, HRV / Resting HR / Respiratory. Carried day (#543).
                         TodaySection.RECOVERY_VITALS -> Box(modifier = Modifier.fillMaxWidth().staggeredAppear(stagger)) {
@@ -1965,7 +1962,6 @@ private fun ScoreHeroRow(
     restScore: Double?,
     recoveryCalibration: Int?,
     lastScoredCharge: LastCharge? = null,
-    effortScale: EffortScale,
     liveTodayStrain: Double? = null,
     // One card-level provenance label derived from the three REAL per-metric merge winners upstream.
     heroSourceLabel: String? = null,
@@ -1985,8 +1981,8 @@ private fun ScoreHeroRow(
     }
     // Effort honours the 0–100 / WHOOP-0–21 toggle (#313). The stored strain is on NOOP's 0–100 Effort
     // axis; render it on the user's selected scale so the arc and centre number match the app's Effort.
-    val effortOutOf = if (effortScale == EffortScale.WHOOP) 21.0 else 100.0
-    val effortVal = strain?.let { UnitFormatter.effortValue(it, effortScale) } ?: 0.0
+    val effortOutOf = 21.0
+    val effortVal = strain?.let { UnitFormatter.effortValue(it) } ?: 0.0
 
     // The vessels run LIVE (per-frame slosh + tilt) once the row has any real score to show; a wholly
     // empty/calibrating hero poses them static so a brand-new user's launch churn isn't fighting live
@@ -2067,7 +2063,7 @@ private fun ScoreHeroRow(
                             diameter = ring,
                             animated = animated,
                             showsValue = strain != null,
-                            format = { if (effortScale == EffortScale.WHOOP) String.format(Locale.US, "%.1f", it) else it.toInt().toString() },
+                            format = { String.format(Locale.US, "%.1f", it) },
                         )
                         if (strain == null) RingNoData()
                     }
@@ -3239,7 +3235,6 @@ private fun MetricGrid(
     // last row that actually has a reading. Mirrors iOS TodayView.lastSpo2Day (carriedVital's per-field fallback).
     spo2CarryDay: DailyMetric? = null,
     unitSystem: UnitSystem = UnitSystem.METRIC,
-    effortScale: EffortScale = EffortScale.HUNDRED,
     latestWeightKg: Double? = null,
     profileWeightKg: Double = 75.0,
     importedStepsForDay: Int? = null,
@@ -3298,7 +3293,7 @@ private fun MetricGrid(
         },
         KeyMetric.EFFORT to KeyTileData(
             label = uiString(R.string.l10n_today_screen_strain_79fe380e),
-            value = d?.strain?.let { UnitFormatter.effortDisplay(it, effortScale) } ?: NO_DATA,
+            value = d?.strain?.let { UnitFormatter.effortDisplay(it) } ?: NO_DATA,
             // #492: Strain/Effort is a load index (0–21 WHOOP / 0–100 POOP), NOT a percentage — the "%"
             // was wrong (esp. on the 0–21 scale). Recovery/Rest ARE 0–100 % and keep it. iOS shows the
             // strain axis as an "of 21"/"of 100" caption with no % (TodayView effort tile); match that.
@@ -3621,7 +3616,6 @@ private fun HeartRateTrendCard(
     selectedDay: LocalDate,
     today: LocalDate,
     displayMetric: DailyMetric? = null,
-    effortScale: EffortScale = EffortScale.HUNDRED,
 ) {
     // "Today" here is the LOGICAL day (rolls at 04:00 local), so in the small hours after midnight the
     // trend keeps the evening's curve, window start at the logical day's own midnight, "since midnight"
@@ -3835,7 +3829,6 @@ private fun HeartRateTrendCard(
                         workouts = workoutsToday,
                         recovery = displayMetric?.recovery,
                         strain = displayMetric?.strain,
-                        effortScale = effortScale,
                         timeTicks = timeTicks,
                         modifier = Modifier
                             .fillMaxWidth()
@@ -4063,7 +4056,6 @@ private fun OverviewHRChart(
     workouts: List<WorkoutRow>,
     recovery: Double?,
     strain: Double?,
-    effortScale: EffortScale,
     modifier: Modifier,
     // Round wall-clock (epochSec, "HH:mm") ticks, each drawn as a dotted gridline under the curve.
     // The matching labels render OUTSIDE this plot-height composable (HrTimeAxisLabels), sharing
@@ -4135,12 +4127,12 @@ private fun OverviewHRChart(
 
     // One combined TalkBack description for the overlay layers, so the markers (which are otherwise
     // small decorative pills) are announced. Only mentions the layers actually present.
-    val markerDescription = remember(sleep, recovery, strain, workouts, effortScale) {
+    val markerDescription = remember(sleep, recovery, strain, workouts) {
         buildList {
             add("24-hour heart rate")
             if (sleep != null) add("sleep band ${hrHoursMinutes((sleep.endTs - sleep.effectiveStartTs).toInt())}")
             if (recovery != null) add("${recovery.roundToInt()} percent Charge at wake")
-            if (strain != null) add("${UnitFormatter.effortDisplay(strain, effortScale)} Effort now")
+            if (strain != null) add("${UnitFormatter.effortDisplay(strain)} Effort now")
             if (workouts.isNotEmpty()) add("${workouts.size} workout${if (workouts.size == 1) "" else "s"} marked")
         }.joinToString(", ")
     }
@@ -4275,7 +4267,7 @@ private fun OverviewHRChart(
             }
             if (effortX != null) {
                 ChartMarkerPill(
-                    text = uiString(R.string.l10n_today_screen_unitformatter_effortdisplay_strain_effortscale_effort_53dbd951, UnitFormatter.effortDisplay(strain, effortScale)),
+                    text = uiString(R.string.l10n_today_screen_unitformatter_effortdisplay_strain_effortscale_effort_53dbd951, UnitFormatter.effortDisplay(strain)),
                     color = Palette.effortTint(strain / StrainScorer.maxStrain),
                     modifier = Modifier.markerOffset(plotW, density, topPadDp, alignEnd = true),
                 )

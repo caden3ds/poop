@@ -61,7 +61,6 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
     val context = LocalContext.current
     val profile = remember { ProfileStore.from(context.applicationContext) }
     // Effort display scale (#268) — routes the live Effort read-out so it matches every other surface.
-    val effortScale = UnitPrefs.effortScale(context)
     val bpm by vm.bpm.collectAsStateWithLifecycle()
     val activeWorkout by vm.activeWorkout.collectAsStateWithLifecycle()
     // Additive: instantaneous speed/cadence/power from a connected standard fitness sensor (RSC/CSC/CPS),
@@ -143,7 +142,7 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
 
             // The accumulating Effort on the shared layered StrainGauge — liveStrain is on NOOP's 0–100
             // Effort axis, mapped to the gauge's 0–21 span (mirrors the Today effort hero). Display-only.
-            EffortGauge(liveStrain = w.liveStrain, effortScale = effortScale)
+            EffortGauge(liveStrain = w.liveStrain)
 
             // Zone rail — five segments, the active one lit.
             ZoneRail(zone = zone, zoneSet = zoneSet)
@@ -154,7 +153,7 @@ fun LiveWorkoutScreen(vm: AppViewModel, onClose: () -> Unit) {
                     accent = if (w.avgHr > 0) Palette.metricRose else Palette.textPrimary)
                 StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_peak_c83dbbd3), value = if (w.peakHr > 0) "${w.peakHr}" else "—",
                     accent = if (w.peakHr > 0) Palette.metricRose else Palette.textPrimary)
-                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain, effortScale),
+                StatTile(modifier = Modifier.weight(1f), label = uiString(R.string.l10n_live_workout_screen_effort_8c974bc6), value = UnitFormatter.effortDisplay(w.liveStrain),
                     accent = Palette.strainColor(w.liveStrain))
             }
 
@@ -247,7 +246,7 @@ private fun SensorRow(sensor: StandardHrSource.SensorMetrics) {
 }
 
 @Composable
-private fun EffortGauge(liveStrain: Double, effortScale: EffortScale) {
+private fun EffortGauge(liveStrain: Double) {
     NoopCard(padding = 18.dp, tint = Palette.effortColor) {
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -256,9 +255,9 @@ private fun EffortGauge(liveStrain: Double, effortScale: EffortScale) {
         ) {
             Overline("Effort building", color = Palette.effortColor)
             StrainGauge(
-                strain = UnitFormatter.effortValue(liveStrain, effortScale),
-                outOf = if (effortScale == EffortScale.WHOOP) 21.0 else 100.0,
-                valueText = UnitFormatter.effortDisplay(liveStrain, effortScale),
+                strain = UnitFormatter.effortValue(liveStrain),
+                outOf = 21.0,
+                valueText = UnitFormatter.effortDisplay(liveStrain),
                 diameter = 150.dp,
                 lineWidth = 14.dp,
             )
