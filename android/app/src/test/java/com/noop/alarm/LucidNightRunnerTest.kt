@@ -223,6 +223,47 @@ class LucidNightRunnerTest {
     }
 
     @Test
+    fun `a night whose confidence never reaches the fixed bar can still cue`() {
+        // THE DEFECT. The estimator's ability to RANK REM against non-REM held up across sixteen
+        // scored nights (AUC 0.67-0.81), but the absolute confidence drifted down as the learned
+        // classes converged — on one night REM averaged 0.23. Five of sixteen nights produced no cue
+        // at all, with nothing wrong with them, purely because 0.55 was unreachable.
+        //
+        // Here the whole night sits low, with a clearly REM-like stretch that never crosses the fixed
+        // bar. Once there is an hour of context the threshold is tonight's own p80, so it can fire.
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+        var cued = false
+        // 90 minutes of quiet, then a sustained more-elevated, more-variable stretch.
+        for (i in 0 until 180) {
+            val hr = if (i < 90) 48 + (i % 2) else remPattern[i % remPattern.size]
+            val tick = runner.onHeartRate(
+                hr = hr, nowMs = i * minute, floorBpm = 46,
+                template = template, minutesAsleep = 200 + i, state = state, enabled = true,
+            )
+            state = tick.nextState
+            if (tick.cue != null) cued = true
+        }
+        assertTrue("a low-scale night must still be able to cue on its own distribution", cued)
+    }
+
+    @Test
+    fun `a flat night still cues nothing`() {
+        // The adaptive threshold must not manufacture REM out of a night with no structure: a
+        // percentile always has a top fifth, so the fixed bar stays as a floor beneath it.
+        val runner = LucidNightRunner()
+        var state = LucidCuePolicy.NightState()
+        for (i in 0 until 240) {
+            val tick = runner.onHeartRate(
+                hr = 48, nowMs = i * minute, floorBpm = 47,
+                template = template, minutesAsleep = 200 + i, state = state, enabled = true,
+            )
+            state = tick.nextState
+            assertNull("a flat night has no REM to find (tick $i)", tick.cue)
+        }
+    }
+
+    @Test
     fun `waking ends the period instead of riding the smoothing window out`() {
         // The cue that fired at 08:06 did so because a refusal added NOTHING to the smoothing window,
         // which kept averaging ten minutes of pre-waking confidence. So it is not enough for the

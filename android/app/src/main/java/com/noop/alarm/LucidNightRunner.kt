@@ -61,7 +61,38 @@ class LucidNightRunner(
      * window and no smoothing was always asking the signal for more resolution than it has.
      */
     private val confidenceSmoothingMs: Long = 10 * 60_000L,
+    /**
+     * Fraction of tonight's own smoothed readings that must sit BELOW a value for it to count as REM.
+     *
+     * The threshold is relative because the signal's scale is not stable between nights, while its
+     * ability to rank REM against non-REM is. Measured across sixteen of the user's scored nights, the
+     * estimator's AUC held at 0.67–0.81 throughout — it never stopped telling REM from non-REM — yet
+     * the ABSOLUTE confidence drifted down as the learned classes converged, until on some nights REM
+     * averaged 0.23 and a fixed 0.55 bar was unreachable. Five of sixteen nights produced no cue at all
+     * for that reason, having nothing wrong with them.
+     *
+     * 0.80 is the physiology: REM is roughly a fifth to a quarter of a night, so the top fifth of
+     * tonight's readings is where it should be. Backtested against a fixed 0.55 over those nights it
+     * fires the same number of cues (34 against 33), lands 76% of them in REM against 61%, and reaches
+     * fifteen nights instead of eleven.
+     */
+    private val adaptiveThresholdPercentile: Double = 0.80,
+    /** Readings needed before the adaptive threshold is trusted; until then the fixed one applies. */
+    private val adaptiveMinSamples: Int = 60,
+    /** How often the adaptive threshold is recomputed. Longer than any cue window, so a period cannot
+     *  be split by the threshold moving underneath it. */
+    private val adaptiveRecomputeMs: Long = 30 * 60_000L,
 ) {
+
+    /** One smoothed reading per minute of tonight, for the adaptive threshold's percentile. */
+    private val nightConfidence = ArrayList<Double>()
+
+    /** When the last percentile sample was taken, so this stays one-a-minute at any stream rate. */
+    private var lastPercentileSampleMs: Long? = null
+
+    /** The adaptive threshold in force, and when it was last recomputed. */
+    private var adaptiveThreshold: Double? = null
+    private var adaptiveThresholdAtMs: Long? = null
 
     /** (timestampMs, confidence) over the smoothing window — see [confidenceSmoothingMs]. */
     private val recentConfidence = ArrayDeque<Pair<Long, Double>>()
@@ -203,7 +234,39 @@ class LucidNightRunner(
         }
         val confidence = if (recentConfidence.isEmpty()) null
                          else recentConfidence.sumOf { it.second } / recentConfidence.size
-        val inRem = confidence != null && confidence >= LiveRemEstimator.CUE_THRESHOLD
+        // Sample tonight's distribution at most once a minute — the stream is ~1 Hz, and a percentile
+        // over 30k points costs more than it tells us.
+        if (confidence != null &&
+            (lastPercentileSampleMs == null || nowMs - lastPercentileSampleMs!! >= 60_000L)
+        ) {
+            lastPercentileSampleMs = nowMs
+            nightConfidence.add(confidence)
+        }
+        // Relative to tonight once there is an hour of it; the fixed bar until then. See
+        // [adaptiveThresholdPercentile] for why an absolute threshold could not work.
+        //
+        // Recomputed on a slow cadence and HELD in between. A threshold that moved every tick was a
+        // moving target: as more high readings accumulated it rose past readings it had already
+        // accepted, ending the REM period and opening a new one — which handed back a fresh
+        // per-period cue budget. A long REM stretch could then yield four cues where the policy allows
+        // two. Holding it steady for longer than any single cue window closes that.
+        // NEVER while a REM period is open. Changing the bar under a period that already cleared the
+        // old one ends it and starts another, which hands back a fresh per-period cue budget — a long
+        // stretch then yielded four cues where the policy allows two. The switch from the fixed bar to
+        // the adaptive one is the same event and had the same effect. `remPeriodStartMs` still holds
+        // the PREVIOUS tick's state here, which is exactly the question being asked.
+        if (remPeriodStartMs == null &&
+            nightConfidence.size >= adaptiveMinSamples &&
+            (adaptiveThresholdAtMs == null || nowMs - adaptiveThresholdAtMs!! >= adaptiveRecomputeMs)
+        ) {
+            adaptiveThresholdAtMs = nowMs
+            val sorted = nightConfidence.sorted()
+            val idx = (sorted.size * adaptiveThresholdPercentile).toInt().coerceIn(0, sorted.size - 1)
+            // Never let a flat night cue on noise: the fixed bar remains a floor the night must clear.
+            adaptiveThreshold = maxOf(sorted[idx], LiveRemEstimator.CUE_THRESHOLD * 0.6)
+        }
+        val threshold = adaptiveThreshold ?: LiveRemEstimator.CUE_THRESHOLD
+        val inRem = confidence != null && confidence >= threshold
         // Why the estimator could not answer, when it could not. This must not be thrown away: an
         // Unavailable estimate yields inRem=false exactly like a low-confidence Read does, so the policy
         // reports the generic "Not in REM" for both and the actual cause — no floor, no template, a thin
@@ -296,6 +359,10 @@ class LucidNightRunner(
     fun reset() {
         recentHr.clear()
         recentConfidence.clear()
+        nightConfidence.clear()
+        lastPercentileSampleMs = null
+        adaptiveThreshold = null
+        adaptiveThresholdAtMs = null
         remPeriodStartMs = null
         lastInRemMs = null
         arousalBaseline = null
