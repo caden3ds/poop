@@ -506,7 +506,14 @@ private fun lucidLastNightSummary(context: android.content.Context): String {
     val estimates = p.getInt(LucidPrefs.LAST_NIGHT_ESTIMATES, 0)
     val noHr = p.getInt(LucidPrefs.LAST_NIGHT_NO_HR_TICKS, 0)
 
-    if (cues > 0) return "$label: $cues cue${if (cues == 1) "" else "s"} fired. Peak REM confidence $conf%."
+    if (cues > 0) {
+        // Name the TIMES, not just the count. A cue that worked is one you slept through, so the
+        // morning has no memory to check this against — and 06:03 versus 10:48 is the difference
+        // between a working night and a wake mark left open.
+        val times = p.getString(LucidPrefs.LAST_NIGHT_CUE_TIMES, "").orEmpty()
+        val at = if (times.isBlank()) "" else " at ${times.split(",").joinToString(", ")}"
+        return "$label: $cues cue${if (cues == 1) "" else "s"} fired$at. Peak REM confidence $conf%."
+    }
     val wanted = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_WANTED, 0)
     val armed = p.getInt(LucidPrefs.LAST_NIGHT_STREAM_ARMED, 0)
     val bonded = p.getBoolean(LucidPrefs.LAST_NIGHT_BONDED, false)

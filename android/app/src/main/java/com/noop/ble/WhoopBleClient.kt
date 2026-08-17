@@ -629,8 +629,17 @@ class WhoopBleClient(
          *  spans the threshold + re-nudge cadence and a separating Active break for bout continuity). */
         private const val INACTIVITY_LOOKBACK_S = 4 * 3600L
 
-        /** Pulses in the lucid-dream cue. Three is the pattern the daytime half conditions against. */
-        private const val LUCID_PULSE_COUNT = 3
+        /**
+         * Pulses in the lucid-dream cue. TWO, each long — the pattern the daytime half conditions
+         * against, so this governs both halves at once.
+         *
+         * Was three shorter ones. The count came down and the length went up for the same reason: the
+         * cues were firing correctly and going unnoticed. A single pulse was considered and rejected —
+         * an isolated stimulus in sleep reads as noise, gives only one chance to land, and to be
+         * noticeable at all it would have to be long enough to risk waking rather than cueing. Two
+         * spaced pulses stay recognisable as deliberate while spreading the salience over time.
+         */
+        private const val LUCID_PULSE_COUNT = 2
 
         /**
          * THE 5/MG CONSTRAINT, which drove this whole design.
@@ -650,17 +659,25 @@ class WhoopBleClient(
          */
         private const val LUCID_SUBWRITE_MS = 120L
 
-        /** Preset writes stacked into one long buzz. */
-        private const val LUCID_SUBWRITES_GENTLE = 3
+        /**
+         * Preset writes stacked into one long buzz.
+         *
+         * Raised from 3. Every cue this feature has ever delivered was GENTLE — SALIENT only fires as a
+         * SECOND attempt inside one REM period, and in practice the first cue ends the period (arousal
+         * stand-down or exit), so the ramp had never once been exercised. The old GENTLE was therefore
+         * the whole of the user's experience of this feature, and it was too faint to notice. GENTLE is
+         * now what SALIENT used to be, and SALIENT goes beyond it.
+         */
+        private const val LUCID_SUBWRITES_GENTLE = 5
 
         /** Salient ramp: a LONGER buzz, since amplitude and loop count are both unavailable. */
-        private const val LUCID_SUBWRITES_SALIENT = 5
+        private const val LUCID_SUBWRITES_SALIENT = 7
 
         /**
-         * START-TO-START spacing of the three long buzzes (ms).
+         * START-TO-START spacing of the long buzzes (ms).
          *
-         * Must comfortably exceed one long buzz (~3 × 120 ms of stacked preset plus the preset's own
-         * tail) or the three run together — which is precisely how the first two attempts at this ended
+         * Must comfortably exceed one long buzz (~5 × 120 ms of stacked preset plus the preset's own
+         * tail) or they run together — which is precisely how the first two attempts at this ended
          * up indistinguishable from a notification. 1600 leaves a clear silence between them.
          */
         private const val LUCID_PULSE_SPACING_MS = 1_600L
@@ -2832,7 +2849,7 @@ class WhoopBleClient(
     fun buzzLucidCue(bursts: Int = 1) {
         val n = bursts.coerceIn(1, 2)
         val subWrites = if (n >= 2) LUCID_SUBWRITES_SALIENT else LUCID_SUBWRITES_GENTLE
-        log("Lucid cue: 3 long buzzes (subWrites=$subWrites).")
+        log("Lucid cue: $LUCID_PULSE_COUNT long buzzes (subWrites=$subWrites).")
         var offsetMs = 0L
         repeat(LUCID_PULSE_COUNT) {
             // ONE long buzz, synthesised by firing the preset several times in quick succession so the

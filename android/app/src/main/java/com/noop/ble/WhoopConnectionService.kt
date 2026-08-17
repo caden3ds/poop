@@ -928,7 +928,21 @@ class WhoopConnectionService : Service() {
             ble.externalLog("Lucid: stirred after the last cue — standing down for this REM period")
         }
         val strength = tick.cue ?: return
-        prefs.edit().putLong(LucidPrefs.LAST_CUE_AT, now).apply()
+        // Record WHEN, not just how many. Keyed off the same LAST_NIGHT_KEY the rest of the summary
+        // uses, so the first cue of a new night starts the list rather than appending to yesterday's.
+        val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(now))
+        val priorTimes = if (prefs.getString(LucidPrefs.LAST_NIGHT_KEY, null) == todayKey) {
+            prefs.getString(LucidPrefs.LAST_NIGHT_CUE_TIMES, "").orEmpty()
+        } else {
+            ""
+        }
+        prefs.edit()
+            .putLong(LucidPrefs.LAST_CUE_AT, now)
+            .putString(
+                LucidPrefs.LAST_NIGHT_CUE_TIMES,
+                if (priorTimes.isBlank()) clock else "$priorTimes,$clock",
+            )
+            .apply()
         LucidNightLog.log(
             this,
             "CUE ${strength.name} conf=${((tick.remConfidence ?: 0.0) * 100).toInt()}% " +

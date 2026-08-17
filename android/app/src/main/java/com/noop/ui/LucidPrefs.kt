@@ -109,6 +109,16 @@ object LucidPrefs {
      */
     const val LAST_NIGHT_NO_HR_TICKS = "lucid.lastNight.noHrTicks"
 
+    /**
+     * Clock times of the cues that fired last night, comma-separated ("01:53,06:03").
+     *
+     * A cue that works is a cue you slept through, so "did it buzz me?" is the one question the morning
+     * cannot answer from experience — and until now it could only be answered by reading the night log
+     * off the device. The count alone is not enough: knowing a cue landed at 06:03 rather than 10:48
+     * is what separates a working night from a forgotten wake mark.
+     */
+    const val LAST_NIGHT_CUE_TIMES = "lucid.lastNight.cueTimes"
+
     const val DEFAULT_DAY_CUES_PER_DAY = 4
     const val DEFAULT_DAY_START_MIN = 10 * 60   // 10:00
     const val DEFAULT_DAY_END_MIN = 21 * 60     // 21:00
