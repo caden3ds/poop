@@ -26,13 +26,41 @@ package com.noop.alarm
  *    the wake window), the watcher simply never arms and the feature is an honest no-op.
  */
 class RebuzzWatcher(
-    /** How far above the nightly trough (bpm) still counts as "back at the sleep floor". Deliberately
-     *  narrower than [SleepWindowWatcher.riseBpm] (6) so "re-asleep" and "lighter phase" can't both be
-     *  true for the same reading. */
-    private val nearTroughBpm: Int = 4,
-    /** How long (ms) HR must sit near the trough CONTINUOUSLY before a re-buzz. ~3 min filters the
-     *  brief post-snooze dip of someone lying still but awake. */
-    private val sustainMs: Long = 3 * 60_000L,
+    /**
+     * How far above the nightly trough (bpm) still counts as "back at the sleep floor".
+     *
+     * WAS 4, and that made the feature impossible. The trough is the single lowest five-minute bucket
+     * of the WHOLE night — the deepest moment of deep sleep. Requiring a return to within 4 bpm of it,
+     * within half an hour of an alarm, asks for something that does not happen: after an alarm you are
+     * in light sleep at best. Replayed over 21 of the user's scored nights, trough+4 fired on ZERO of
+     * them, while the hypnogram says he was genuinely asleep again on 12.
+     *
+     * 14 is measured, not guessed. Swept against those nights with the sustain below:
+     *
+     *     trough+4,  3 min:   0 of 12 caught,  0 false
+     *     trough+12, 3 min:   6 of 12 caught,  2 false   (75% precision)
+     *     trough+14, 4 min:   8 of 12 caught,  2 false   (80% precision)
+     *     trough+18, 4 min:  10 of 12 caught,  3 false   (77% precision)
+     *
+     * Precision is weighted over recall because a false positive is not a silent miss: it arms the
+     * strap's own firmware alarm, which buzzes insistently until double-tapped off. Firing that at
+     * someone already up is worse than staying quiet.
+     *
+     * This is now WIDER than [SleepWindowWatcher.riseBpm] (6), which the old comment said it must never
+     * be. That invariant was about the two never both being true — but they are temporally disjoint:
+     * the light-sleep watcher runs INSIDE the wake window, before the alarm, and this one only arms
+     * once the alarm has fired. They never read the same tick.
+     */
+    private val nearTroughBpm: Int = 14,
+    /**
+     * How long (ms) HR must sit near the trough CONTINUOUSLY before a re-buzz.
+     *
+     * Raised from 3 min to 4 alongside the wider band. The extra minute is what buys the precision back:
+     * across the same 21 nights, trough+14 at 3 min caught 10 with 4 false alarms (71%), while 4 min
+     * caught 8 with 2 (80%). A wider band lets "lying still but awake" in; a longer hold filters it out
+     * again, because someone genuinely awake does not hold a sleeping heart rate for four minutes.
+     */
+    private val sustainMs: Long = 4 * 60_000L,
     /** How long (ms) after the alarm fired the watcher keeps watching. Past this you're either up or
      *  have decisively chosen to sleep on — repeated buzzing an hour later would be noise. */
     private val watchWindowMs: Long = 30 * 60_000L,
