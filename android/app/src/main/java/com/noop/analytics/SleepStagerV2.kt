@@ -195,12 +195,30 @@ object SleepStagerV2 {
     private const val respWeight = 0.6
 
     /** Transition matrix (rows = from, cols = to). Self-transitions dominate; deep↔rem rare; wake mostly
-     *  to/from light. A priori, not fit. */
+     *  to/from light. A priori, not fit.
+     *
+     *  The AWAKE row encodes sleep-onset physiology directly: a sleeper does not enter N3 or REM straight
+     *  out of wakefulness — descent runs through N1/N2 — so wake→deep and wake→rem are ZERO rather than the
+     *  small non-zero values they used to carry, and the freed mass goes to the wake self-loop, which makes
+     *  a WASO episode span several epochs instead of flickering back to sleep after one.
+     *
+     *  ZERO is a strong prior, not a prohibition: the viterbi floor turns it into ≈ -20.7 against
+     *  wake→light's ≈ -2.3, an ~18.4 log-unit penalty a sufficiently strong emission can still cross, so a
+     *  genuine sleep-onset REM period stays representable rather than structurally impossible.
+     *
+     *  Ported from upstream ryanbr/noop 98d1d1ff, where it is measured rather than asserted: against the
+     *  strap's own band sleep_state (21 nights, 15 554 epochs) sleep/wake kappa 0.105 → 0.118 and wake
+     *  sensitivity 16.0 % → 17.6 %; against human-scored PSG (PhysioNet, 31 subjects, 26 773 epochs)
+     *  4-class kappa 0.356 → 0.363 and REM F1 0.569 → 0.575.
+     *
+     *  It matters here beyond staging accuracy: the lucid REM template is LEARNED from these labels, so a
+     *  post-wake epoch mislabelled REM teaches the estimator that being awake looks like REM — the exact
+     *  contamination that a forgotten wake mark already caused once. */
     internal val transition: Map<String, Map<String, Double>> = mapOf(
         "deep" to mapOf("deep" to 0.86, "rem" to 0.007, "light" to 0.126, "awake" to 0.007),
         "rem" to mapOf("deep" to 0.005, "rem" to 0.88, "light" to 0.10, "awake" to 0.015),
         "light" to mapOf("deep" to 0.06, "rem" to 0.06, "light" to 0.85, "awake" to 0.03),
-        "awake" to mapOf("deep" to 0.01, "rem" to 0.02, "light" to 0.27, "awake" to 0.70))
+        "awake" to mapOf("deep" to 0.0, "rem" to 0.0, "light" to 0.10, "awake" to 0.90))
 
     /** One 30 s epoch's recipe features. Nullable means "no measurement"; the z-score / percentile treat a
      *  missing value as the neutral centre so a sparse channel never blocks a stage. Internal (not private) so
@@ -428,8 +446,10 @@ object SleepStagerV2 {
      *  uniform start. Ties resolve to the earlier stage in [stageNames]. */
     private fun viterbi(emSeq: List<Map<String, Double>>): List<String> {
         if (emSeq.isEmpty()) return emptyList()
-        // Floor before ln so a zeroed transition entry (a legal hand-edit) can never hit ln(0) = -Inf
-        // and poison the lattice. Inert for the current matrix (no zero entries). Kept from #348.
+        // Floor before ln so a zeroed transition entry can never hit ln(0) = -Inf and poison the lattice.
+        // LOAD-BEARING, not defensive: the awake row carries wake→deep = wake→rem = 0.0, so this floor is
+        // the only thing between those two entries and -Inf. Deleting it does not remove dead code, it
+        // breaks the stager. Floored, a zero costs ln(1e-9) ≈ -20.7 against wake→light's ≈ -2.3.
         val logT = transition.mapValues { (_, row) -> row.mapValues { (_, v) -> ln(maxOf(v, 1e-9)) } }
         var v = emSeq[0]   // uniform start
         val back = ArrayList<Map<String, String>>()

@@ -639,18 +639,55 @@ class WhoopBleClient(
          * noticeable at all it would have to be long enough to risk waking rather than cueing. Two
          * spaced pulses stay recognisable as deliberate while spreading the salience over time.
          */
+        /**
+         * Build the WHOOP 5/MG ("maverick") haptic body from a 4.0-shaped `[patternId, loops, 0, 0, 0]`
+         * payload, carrying the repeat count through to the wire.
+         *
+         * ```
+         *   [0]      REVISION_1 = 0x01
+         *   [1..8]   effects x8 — the "notify" preset (47, 152, then 0)
+         *   [9..10]  loopControl, u16 LE  — left 0, as in the shipped alarm body
+         *   [11]     overallLoop          — the repeat count (was hardcoded 0)
+         * ```
+         *
+         * Ported from upstream ryanbr/noop 80c14031, where it is HARDWARE-CONFIRMED on a real WHOOP
+         * 5/MG: writing overallLoop=3 produced FOUR buzzes, so the field counts the repeats that FOLLOW
+         * the first pulse and is written as `loops - 1`. The model explains the OLD behaviour exactly —
+         * a pinned 0 meant "no repeats", i.e. the single buzz every pattern used to give — and matches
+         * AlarmPayload, which ships this same effects pair with overallLoop=7 for an alarm's buzz train.
+         *
+         * `loops = 1` reproduces the previously shipped constant byte-for-byte, so this is strictly
+         * additive: byte 11 only moves when the caller asked for more than one pulse.
+         *
+         * Clamped to 1..8 (overallLoop 0..7), 7 being the largest value evidenced by the alarm body. A
+         * payload shorter than 2 bytes falls back to a single pulse rather than indexing out of bounds.
+         */
+        internal fun maverickHapticBody(payload: ByteArray): ByteArray {
+            val loops = if (payload.size >= 2) (payload[1].toInt() and 0xFF).coerceIn(1, 8) else 1
+            return byteArrayOf(
+                0x01,                                   // [0]     REVISION_1
+                47, 152.toByte(), 0, 0, 0, 0, 0, 0,     // [1..8]  effects x8 ("notify" preset)
+                0, 0,                                   // [9..10] loopControl u16 LE
+                (loops - 1).toByte(),                   // [11]    overallLoop = repeats AFTER the first
+            )
+        }
+
         private const val LUCID_PULSE_COUNT = 2
 
         /**
-         * THE 5/MG CONSTRAINT, which drove this whole design.
+         * THE 5/MG CONSTRAINT that drove this design — NOW LIFTED, but the design is kept for now.
          *
-         * On a WHOOP 5/MG `send()` REPLACES the haptic payload with a fixed "notify" preset
-         * (`[0x01, 47, 152, 0…]`) — so [buzz]'s `loops` argument is DISCARDED. buzz(1), buzz(2) and
-         * buzz(3) all fire the identical preset. Pulse length is therefore not something we can ask
-         * for; the only two levers are HOW MANY presets we fire and HOW FAR APART.
+         * It used to be true that `send()` replaced the haptic payload with a fixed "notify" preset and
+         * DISCARDED [buzz]'s `loops`, so buzz(1), buzz(2) and buzz(3) were indistinguishable. That is
+         * why a long buzz is synthesised below by stacking preset writes. [maverickHapticBody] fixes the
+         * root cause: byte 11 (overallLoop) was pinned to 0, and now carries the repeat count.
          *
-         * (This also means the Haptic Clock's long-vs-short digit encoding, which spends the same loop
-         * count, cannot be distinguishing anything on a 5/MG either.)
+         * The stacking is left in place deliberately, because it still works unchanged — every call here
+         * passes loops=1, which reproduces the old body byte-for-byte. Switching to native repeats is a
+         * separate change that alters what the wrist feels, and should be felt before it is shipped.
+         *
+         * (The Haptic Clock's long-vs-short digit encoding, which spends the same loop count, should now
+         * distinguish on a 5/MG as well — it was silently uniform before.)
          *
          * A LONG buzz is built by firing the preset [LUCID_SUBWRITES_GENTLE] times [LUCID_SUBWRITE_MS]
          * apart — fast enough that the motor never settles, so they run together as one sustained buzz.
@@ -2719,8 +2756,9 @@ class WhoopBleClient(
             // 4-byte boundary, which this 12-byte payload needs. WHOOP 4.0 is untouched (79 + its own frame).
             val isHaptics = cmd == CommandNumber.RUN_HAPTICS_PATTERN
             val puffinCmd = if (isHaptics) 0x13 else cmd.rawValue
-            val puffinPayload = if (isHaptics)
-                byteArrayOf(0x01, 47, 152.toByte(), 0, 0, 0, 0, 0, 0, 0, 0, 0) else payload
+            // Byte 11 (overallLoop) used to be pinned to 0 here, so the caller's repeat count never
+            // reached the wire and every pattern felt identical on a 5/MG. See [maverickHapticBody].
+            val puffinPayload = if (isHaptics) maverickHapticBody(payload) else payload
             val s = seq.incrementAndGet() and 0xFF
             val frame = Framing.puffinCommandFrame(cmd = puffinCmd, seq = s, payload = puffinPayload)
             enqueueWrite(PendingWrite(frame, withResponse, cmd))
@@ -3270,6 +3308,24 @@ class WhoopBleClient(
      * added per @ujix's wire capture #535). Port of macOS `BLEManager.armStrapAlarm`. WHOOP 4.0; on
      * 5/MG `send()` uses the separate REVISION_4 path.
      */
+    /**
+     * Ask the strap what alarm it currently has stored. The reply lands on the command-notify
+     * characteristic and is handled by the same GET_ALARM_TIME branch an arm's own follow-up read uses.
+     *
+     * Ported from upstream ryanbr/noop 7146fc2b. It exists because the readback was otherwise only
+     * reachable by ARMING: someone whose alarm is off could not produce the evidence needed to explain
+     * what their strap actually reports. That is exactly the position this fork was in while diagnosing
+     * the fall-back-asleep re-buzz, where the only visible alarm evidence was a fire stamp after the fact.
+     *
+     * Not family-gated, unlike [armStrapAlarm] — defensively, not as a feature: [send] already no-ops
+     * when nothing is connected, and only the 4.0 branch decodes the reply, so an errant call costs one
+     * ignored write.
+     */
+    fun getStrapAlarm() {
+        send(CommandNumber.GET_ALARM_TIME, byteArrayOf(0x01))
+        log("Alarm: requested current alarm time")
+    }
+
     fun armStrapAlarm(epochSec: Long) {
         if (connectedFamily == DeviceFamily.WHOOP5) {
             // 5/MG SET_ALARM_TIME is REVISION_4 (the strap arms its own RTC alarm + fires the wake

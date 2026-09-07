@@ -33,15 +33,30 @@ object ManualWorkoutRescore {
         (currentKcal ?: 0.0) <= UNDER_SCORED_KCAL_THRESHOLD
 
     /** Recompute avg/peak HR, strain and calories from [windowSamples] (the HR now stored for the
-     *  workout's [start, end]). Returns null when there are too few samples to score meaningfully. */
-    fun scored(windowSamples: List<HrSample>, profile: UserProfile, hrMax: Double): Scored? {
+     *  workout's [start, end]). Returns null when there are too few samples to score meaningfully.
+     *
+     *  [restingHR] is the wearer's MEASURED resting HR. The strain %HRR denominator needs it, and it used
+     *  to fall back silently to a hardcoded 60 here while the DAY total was scored against the measured
+     *  value — so a fit wearer's workout was systematically under-scored relative to the very day it sat
+     *  in. At a resting HR in the low 40s that is a large distortion of heart-rate reserve. null keeps
+     *  the old default (a cold start with no measured resting yet). Ported from upstream bcf9d8ea. */
+    fun scored(
+        windowSamples: List<HrSample>,
+        profile: UserProfile,
+        hrMax: Double,
+        restingHR: Double? = null,
+    ): Scored? {
         if (windowSamples.size < 2) return null
         val bpms = windowSamples.map { it.bpm }
         // Integer mean, matching AppViewModel.endWorkout (Android truncates; iOS rounds — each mirrors
         // its own platform's save-time formula).
         val avg = bpms.sum() / bpms.size
         val peak = bpms.maxOrNull() ?: 0
-        val strain = StrainScorer.strain(windowSamples, maxHR = hrMax, sex = profile.sex)
+        val strain = if (restingHR != null) {
+            StrainScorer.strain(windowSamples, maxHR = hrMax, restingHR = restingHR, sex = profile.sex)
+        } else {
+            StrainScorer.strain(windowSamples, maxHR = hrMax, sex = profile.sex)
+        }
         val kcalRaw = Calories.estimateBoutCalories(windowSamples, profile, hrMax, null).first
         return Scored(avg, peak, strain, if (kcalRaw > 0) kcalRaw else null)
     }

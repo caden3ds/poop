@@ -413,16 +413,23 @@ object HrvAnalyzer {
         // Clean the WHOLE series first (range + Malik ectopic), keeping each surviving beat's ts so a
         // window can be cut by timestamp. cleanRR works on the raw ms values; we re-pair to ts by walking
         // the same filters here so the kept ts/ms stay aligned (cleanRR drops items, losing the index map).
-        val ranged = sorted.filter { it.rrMs.toDouble() in RR_MIN_MS..RR_MAX_MS }
+        // Carry each survivor's index in `sorted` through both filters, so the windowed rMSSD below can
+        // tell an adjacent beat-pair from a SPLICE across a dropped one. See [rmssdGapAware].
+        val rangedIdx = ArrayList<Int>(sorted.size)
+        val ranged = ArrayList<RrInterval>(sorted.size)
+        for (i in sorted.indices) {
+            if (sorted[i].rrMs.toDouble() in RR_MIN_MS..RR_MAX_MS) { rangedIdx.add(i); ranged.add(sorted[i]) }
+        }
         if (ranged.size < 2) return emptyList()
         val cleanMs = rejectEctopic(ranged.map { it.rrMs.toDouble() })
         // rejectEctopic preserves order and only drops items, so re-pair by walking both in lockstep: a
         // kept ms value corresponds to the next not-yet-consumed ranged beat with that value.
         val kept = ArrayList<RrInterval>(cleanMs.size)
+        val keptOrigIdx = ArrayList<Int>(cleanMs.size)
         var ri = 0
         for (ms in cleanMs) {
             while (ri < ranged.size && ranged[ri].rrMs.toDouble() != ms) ri++
-            if (ri < ranged.size) { kept.add(ranged[ri]); ri++ }
+            if (ri < ranged.size) { kept.add(ranged[ri]); keptOrigIdx.add(rangedIdx[ri]); ri++ }
         }
         if (kept.size < 2) return emptyList()
         val window = windowSec.toLong()
@@ -442,7 +449,19 @@ object HrvAnalyzer {
             // A window with too few clean beats is a noisy spike, not a trustworthy rMSSD — require
             // [minBeatsPerWindow] survivors (#1035), matching the Swift HRVAnalyzer.rollingRmssd default (8).
             if (span.size < minBeatsPerWindow) continue
-            val r = rmssdRaw(span) ?: continue
+            // GAP-AWARE, as the nightly path already is. Dropping a beat joins two intervals that were
+            // never adjacent, and their difference is a splice rather than a physiological delta — the
+            // spurious large delta [rmssdGapAware] exists to exclude. Equal to [rmssdRaw] on a window
+            // that lost no beat, so only affected windows move; a window whose survivors share NO
+            // adjacent pair now emits nothing rather than a number built entirely from splices.
+            //
+            // Adapted from upstream ryanbr/noop 374144ae: it cleans per window and reads
+            // CleanSeries.contiguous, while this path cleans the whole series once and cuts windows out
+            // of it — so contiguity is derived from the retained original indices instead. Index 0 is
+            // false either way: the window's first beat has no predecessor inside the window.
+            val contiguous = ArrayList<Boolean>(span.size)
+            for (j in lo..hi) contiguous.add(j > lo && keptOrigIdx[j] == keptOrigIdx[j - 1] + 1)
+            val r = rmssdGapAware(span, contiguous) ?: continue
             out.add(tEnd to r)
             lastEmitTs = tEnd
         }

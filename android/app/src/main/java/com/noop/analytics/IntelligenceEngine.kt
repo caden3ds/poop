@@ -1248,7 +1248,14 @@ object IntelligenceEngine {
         // #137: a manually-started workout is scored from sparse live HR at save time , near-zero
         // calories/strain on a 5/MG. Now that offloaded HR may cover the window, re-score the
         // under-sampled ones from that denser data.
-        rescoreManualWorkouts(repo, profile, importedDeviceId, maxHROverride, nowSeconds)
+        // Score the workout against the wearer's MEASURED resting HR, not the hardcoded 60 — the day
+        // total already uses the measured value, and the mismatch is what made a workout's Effort
+        // incomparable to its own day's. FIRST, not last: `out` is NEWEST-FIRST (the scoring loop counts
+        // backwards from today), so out[0] is today and the tail is the oldest day in the window; taking
+        // the last match would score today's workout against a resting HR up to maxDays old.
+        // null (cold start) keeps the scorer's default. Ported from upstream bcf9d8ea.
+        val measuredResting = out.firstOrNull { it.rhr != null }?.rhr?.toDouble()
+        rescoreManualWorkouts(repo, profile, importedDeviceId, maxHROverride, nowSeconds, measuredResting)
 
         return out to healDropped.size
     }
@@ -1302,6 +1309,7 @@ object IntelligenceEngine {
         deviceId: String,
         maxHROverride: Double?,
         nowSeconds: Long,
+        restingHR: Double? = null,
     ) {
         val since = nowSeconds - 14L * 86_400L
         val rows = runCatching { repo.workouts(deviceId, since, nowSeconds) }.getOrNull() ?: return
@@ -1315,7 +1323,7 @@ object IntelligenceEngine {
             if (!ManualWorkoutRescore.looksUnderScored(row.energyKcal) && row.strain != null) continue
             val samples = runCatching { repo.hrSamples(deviceId, row.startTs, row.endTs, 20_000) }
                 .getOrNull() ?: continue
-            val s = ManualWorkoutRescore.scored(samples, profile, hrMax) ?: continue
+            val s = ManualWorkoutRescore.scored(samples, profile, hrMax, restingHR) ?: continue
             if (!ManualWorkoutRescore.improves(s, row.energyKcal, row.strain, allowStrainOnlyFill = true)) continue
             // Never lower a summed kcal: only take the recomputed kcal when it genuinely beats the stored
             // value; a strain-only fill (merged row) keeps the existing summed energyKcal.

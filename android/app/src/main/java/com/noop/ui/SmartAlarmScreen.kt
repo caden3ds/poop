@@ -281,6 +281,18 @@ private fun StrapAlarmCard(vm: AppViewModel) {
                         style = NoopType.footnote, color = Palette.textTertiary,
                     )
                 }
+                // Ask the strap what it actually has stored. Until now the readback was only reachable
+                // by ARMING, so an alarm that misbehaved could not be inspected without changing it —
+                // which is exactly the position the fall-back-asleep diagnosis was in. The answer lands
+                // in the strap log.
+                if (live.connected) {
+                    NoopButton(
+                        text = "What alarm does the strap have?",
+                        kind = NoopButtonKind.Tertiary,
+                        fullWidth = true,
+                        onClick = { vm.ble.getStrapAlarm() },
+                    )
+                }
             }
         }
     }
