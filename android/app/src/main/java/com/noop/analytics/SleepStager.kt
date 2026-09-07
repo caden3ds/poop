@@ -1762,23 +1762,26 @@ object SleepStager {
 
     // ── Per-session HR / HRV ─────────────────────────────────────────────────
 
-    /** Lowest 5-min rolling-mean HR during the session (bpm), or null. */
-    internal fun sessionRestingHR(start: Long, end: Long, hr: List<HrSample>): Int? {
-        val seg = hr.filter { it.ts in start..end }
-        if (seg.isEmpty()) return null
-        val windowS = 5 * 60L
-        val means = ArrayList<Double>()
-        var t = start
-        while (t < end) {
-            val win = seg.filter { it.ts >= t && it.ts < t + windowS }
-            if (win.isNotEmpty()) means.add(win.sumOf { it.bpm }.toDouble() / win.size.toDouble())
-            t += windowS
-        }
-        val m = means.minOrNull()
-        if (m != null) return m.roundToInt()
-        val all = seg.sumOf { it.bpm }.toDouble() / seg.size.toDouble()
-        return all.roundToInt()
-    }
+    /**
+     * Lowest sustained HR during the session (bpm), or null — the day's resting HR.
+     *
+     * DELEGATES to [RecoveryScorer.restingHR] rather than repeating the arithmetic, because the
+     * duplicate here was the unhardened one and it is the copy that actually runs.
+     *
+     * Both computed "the minimum of 5-minute bin means", but #686 added two guards to the
+     * RecoveryScorer copy — a bin may only WIN the floor when it holds at least
+     * [RecoveryScorer.restingHRMinBinSamples] samples AND its mean is at least
+     * [RecoveryScorer.restingHRMinPlausibleBpm] — and that copy has NO production callers. It is
+     * reachable only from its own unit test. So the hardening protected nothing: the daily resting HR
+     * on screen comes from here, via the session rows, and a sparse bin holding a single dropout beat
+     * could be its own "mean" and win the floor outright.
+     *
+     * That is how a resting HR of 39 was reported for a night whose heart rate never visibly went
+     * below 41: one under-populated bin, one artifact reading, no guard. The charted minimum did not
+     * contradict it either, being a downsampled bucket mean that averaged the same artifact away.
+     */
+    internal fun sessionRestingHR(start: Long, end: Long, hr: List<HrSample>): Int? =
+        RecoveryScorer.restingHR(hr = hr, start = start, end = end)
 
     /** One 5-min HRV window: its start ts, the sleep stage at its center, the clean-beat count, and the
      *  window RMSSD (null when fewer than 2 clean beats, or when every successive pair straddles a dropped
