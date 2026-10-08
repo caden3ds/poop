@@ -383,7 +383,7 @@ private suspend fun readTimeline(
             // the chart at day scale (the #575 point-count risk downsampleTimeline handles for the others).
             // #1036 (ryanbr): stepSec closes this Android-only day-scale flood gap.
             val hrvWindow = HrvAnalyzer.DEFAULT_ROLLING_WINDOW_SEC
-            return@withContext runCatching { repo.rrIntervals(deviceId, from, to, 200_000) }.getOrDefault(emptyList())
+            return@withContext runCatching { repo.rrIntervalsForScoring(deviceId, from, to, 200_000) }.getOrDefault(emptyList())
                 .let { HrvAnalyzer.rollingRmssd(it, windowSec = hrvWindow, stepSec = maxOf(1, hrvWindow / 8)) }
                 .map { (ts, v) -> TimelinePoint(ts, v) }
         }

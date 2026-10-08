@@ -71,7 +71,8 @@ object SleepStageHealer {
         // Cheap density gate FIRST (count only) so a sparse imported night skips the three further reads.
         if (!isDense(grav, start, end)) return null
         val hr = repo.hrSamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
-        val rr = repo.rrIntervals(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
+        // Same transport policy as scoring: re-staging from interleaved duplicate beat trains is as wrong as scoring them.
+        val rr = repo.rrIntervalsForScoring(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
         val resp = repo.respSamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT)
         // Only read when the refinement might actually use it — no point paying for it on the (default) off path.
         val steps = if (useMotionAwareWake) repo.stepSamples(deviceId, lo, hi, IntelligenceEngine.STREAM_LIMIT) else emptyList()

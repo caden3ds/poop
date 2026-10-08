@@ -12,7 +12,8 @@ package com.noop.protocol
 data class HrSample(val ts: Int, val bpm: Int)
 
 /** A single beat-to-beat R-R interval (ms) at wall-clock unix seconds [ts]. */
-data class RrInterval(val ts: Int, val rrMs: Int)
+/** One decoded R-R interval. [source] names the WHOOP 5 transport; null for WHOOP 4.0. */
+data class RrInterval(val ts: Int, val rrMs: Int, val source: RrSourceChannel? = null)
 
 /**
  * A raw-ADC SpO2 sample at wall-clock unix seconds [ts]. Mirrors the Room `Spo2Sample` (red/ir)
@@ -226,7 +227,8 @@ fun extractStreams(parsed: List<ParsedFrame>, deviceClockRef: Int, wallClockRef:
                     p.intOrNull("heart_rate")?.let { bpm -> out.hr.add(HrSample(ts, bpm)) }
                     // Drop RR rows when timestamp is absent (a ts-less RR row is unstorable).
                     p.intArrayOrNull("rr_intervals")?.let { rrs ->
-                        for (rr in rrs) out.rr.add(RrInterval(ts, rr))
+                        val source = RrSourceChannel.fromCode(p.intOrNull("rr_source_channel"))
+                        for (rr in rrs) out.rr.add(RrInterval(ts, rr, source))
                     }
                 }
             }

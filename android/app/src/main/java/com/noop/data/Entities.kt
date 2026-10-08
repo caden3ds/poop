@@ -104,6 +104,15 @@ data class RrInterval(
     val rrMs: Int,
     val seq: Int = 0,
     val synced: Int = 0,
+    /**
+     * The WHOOP 5 transport that carried this beat ([com.noop.protocol.RrSourceChannel.code]), or null.
+     *
+     * Null means WHOOP 4.0 or a row written before v24. For a 5/MG a null row is LEGACY: it may be a
+     * correctly-converted standard-profile beat or a native tick word misread as milliseconds, and nothing
+     * on disk separates the two, so it is kept but not scored. Outside the primary key on purpose — two
+     * transports observing the same beat must collide, not both be stored.
+     */
+    val srcChannel: Int? = null,
 )
 
 /**

@@ -32,6 +32,7 @@ import com.noop.data.StreamPersistence
 import com.noop.protocol.Whoop5RawImu
 import com.noop.data.WhoopRepository
 import com.noop.protocol.AlarmPayload
+import com.noop.protocol.RrSourceChannel
 import com.noop.protocol.BackfillCaptureJsonl
 import com.noop.protocol.BackfillCaptureRecord
 import com.noop.protocol.BackfillCaptureSummary
@@ -5638,7 +5639,10 @@ class WhoopBleClient(
     private fun ingestStandardHr(hr: Int, rr: List<Int>, ts: Long) {
         val shouldFlush = synchronized(collectorLock) {
             if (hr in 30..220) stdHr.add(HrRow(ts, hr))
-            for (r in rr) if (r in 250..3000) stdRr.add(RrRow(ts, r))
+            // Labelled only on a 5/MG, where the same beats ALSO arrive over native realtime and history:
+            // scoring must read one transport, and an unlabelled row is legacy. A 4.0 has one source.
+            val source = if (connectedFamily == DeviceFamily.WHOOP5) RrSourceChannel.WHOOP5_STANDARD else null
+            for (r in rr) if (r in 250..3000) stdRr.add(RrRow(ts, r, source))
             stdHr.size + stdRr.size >= 30
         }
         if (shouldFlush) ioScope.launch { flushStandardHr() }

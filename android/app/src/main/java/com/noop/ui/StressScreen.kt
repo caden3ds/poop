@@ -171,7 +171,7 @@ private suspend fun loadDaytimeStress(vm: AppViewModel): DaytimeReadout {
     if (hr.size < DaytimeStress.minHourHrSamples) {
         return DaytimeReadout(DaytimeStress.Result.EMPTY, null, null)
     }
-    val rr = vm.repo.rrIntervals("my-whoop", from, nowSeconds, limit = 200_000)
+    val rr = vm.repo.rrIntervalsForScoring("my-whoop", from, nowSeconds, limit = 200_000)
     val daytime = DaytimeStress.analyze(hr, rr, tzOffsetSeconds)
     // ADDITIVE advanced readouts from the SAME `rr`. Each engine self-gates and returns null when
     // its requirement is not met, in which case its row is simply hidden in the UI.

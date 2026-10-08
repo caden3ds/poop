@@ -390,6 +390,9 @@ object IntelligenceEngine {
 
         // In-memory nightly values harvested in pass 1, used to seed the pass-2 baseline.
         // Keyed by day so the union with imported history de-dupes cleanly per UTC day.
+        // The R-R window each day was scored from, kept so the legacy-preservation step below asks about
+        // EXACTLY the rows scoring saw — a wider or narrower window could find legacy rows scoring never read.
+        val rrReadByDay = HashMap<String, Triple<String, Long, Long>>()
         val nightlyHrvByDay = LinkedHashMap<String, Double?>()
         val nightlyRhrByDay = LinkedHashMap<String, Double?>()
         // Wear-gated nightly skin-temp means (on-device only , imported rows carry the deviation, not
@@ -467,7 +470,9 @@ object IntelligenceEngine {
                 diag("sleep day=$day SKIPPED hrSamples=${hr.size} (need ≥$MIN_HR_SAMPLES)")
                 continue
             }
-            val rr = repo.rrIntervals(owner, from, to, STREAM_LIMIT)
+            // One scorable transport for a 5/MG; every row otherwise. See WhoopRepository.rrIntervalsForScoring.
+            val rr = repo.rrIntervalsForScoring(owner, from, to, STREAM_LIMIT)
+            rrReadByDay[day] = Triple(owner, from, to)
             val resp = repo.respSamples(owner, from, to, STREAM_LIMIT)
             val grav = repo.gravitySamples(owner, from, to, STREAM_LIMIT)
             val steps = repo.stepSamples(owner, from, to, STREAM_LIMIT)
@@ -1032,6 +1037,33 @@ object IntelligenceEngine {
         // after the rewrite would see only the freshly scorable subset. Windowed to the recompute range so
         // it stays bounded (daysMerged is full-history) and can't drag in stale nights older than the window.
         val faPriorDaily = repo.daysMerged(importedDeviceId).filter { it.day in oldestDay..newestDay }
+
+        // ── Keep a previously computed HRV/Charge when its night can no longer be scored ──────────────────
+        // A 5/MG night whose R-R is all unlabelled legacy (written before transports were labelled) now
+        // scores with NO R-R, so HRV — and Charge, which is gated on it — come back null. Nothing on disk
+        // can separate those rows' two scales, so re-scoring them would be worse than declining to; but
+        // overwriting the value the user already had with a blank is worse still, and the delete below
+        // makes that permanent. So the old pair is carried forward as an opaque snapshot, under the
+        // narrowest condition that proves it is an absence rather than an answer. Every other field stays
+        // freshly computed. Ported from upstream ryanbr/noop e79ab584, which shipped after upstream's own
+        // unit fix had already blanked three users' history.
+        //
+        // In this tree the snapshot also keeps feeding the HRV baseline, because the baseline fold reads
+        // persisted history first (see mergeNightlyIntoHistory) — which is what stops Charge falling back
+        // to "calibrating" the morning after the fix lands.
+        val priorComputedByDay = repo.dailyMetrics(computedId, oldestDay, newestDay).associateBy { it.day }
+        for (index in dailies.indices) {
+            val fresh = dailies[index]
+            val prior = priorComputedByDay[fresh.day] ?: continue
+            val priorHrv = prior.avgHrv ?: continue
+            if (fresh.avgHrv != null || (fresh.totalSleepMin ?: 0.0) <= 0.0) continue
+            val (owner, rrFrom, rrTo) = rrReadByDay[fresh.day] ?: continue
+            if (!repo.legacyWhoop5RrWithheld(owner, rrFrom, rrTo)) continue
+            dailies[index] = fresh.copy(avgHrv = priorHrv, recovery = prior.recovery)
+            val outIdx = out.indexOfFirst { it.day == fresh.day }
+            if (outIdx >= 0) out[outIdx] = out[outIdx].copy(hrv = priorHrv, recovery = prior.recovery)
+            diag("hrv day=${fresh.day} KEPT legacy snapshot — night holds only unlabelled 5/MG R-R")
+        }
 
         repo.deleteComputedDailyInRange(computedId, oldestDay, newestDay)
 

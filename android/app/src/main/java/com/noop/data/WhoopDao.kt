@@ -266,6 +266,67 @@ interface WhoopDao : DeviceRegistryDao {
     )
     suspend fun rrIntervals(deviceId: String, from: Long, to: Long, limit: Int): List<RrInterval>
 
+    /**
+     * R-R for SCORING a WHOOP 5/MG: ONE transport across the whole requested interval, chosen before the
+     * LIMIT so a cap can never split the choice.
+     *
+     * Banked history (5) when the window has any, otherwise the standard profile (7). Native realtime (6)
+     * is never eligible — it observes the same beats as the other two, and interleaving two copies of a
+     * beat train fabricates the successive differences RMSSD measures. Unlabelled legacy rows are never
+     * eligible either: they mix scales and origins. With no eligible row the subquery is NULL, `= NULL`
+     * matches nothing, and the result is empty — which is the honest answer.
+     */
+    @Query(
+        "SELECT * FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "AND srcChannel = (SELECT MIN(srcChannel) FROM rrInterval " +
+            "WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to AND srcChannel IN (5, 7)) " +
+            "ORDER BY ts ASC, rrMs ASC, seq ASC LIMIT :limit"
+    )
+    suspend fun whoop5RrIntervals(deviceId: String, from: Long, to: Long, limit: Int): List<RrInterval>
+
+    /** Whether this device has ever written a labelled WHOOP 5 R-R row — positive evidence it is a 5/MG. */
+    @Query("SELECT EXISTS(SELECT 1 FROM rrInterval WHERE deviceId = :deviceId AND srcChannel IN (5, 6, 7))")
+    suspend fun hasWhoop5RrSource(deviceId: String): Boolean
+
+    /** Whether a window holds unlabelled (legacy) R-R rows — the condition for preserving an old score. */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "AND srcChannel IS NULL)"
+    )
+    suspend fun hasLegacyRr(deviceId: String, from: Long, to: Long): Boolean
+
+    /**
+     * On a primary-key collision, hand the surviving row the more canonical label instead of dropping it.
+     *
+     * Native realtime and banked history share the strap clock, so the same beat over both arrives with
+     * the same (ts, rrMs) and the history insert is IGNORED. Without this the row would keep its realtime
+     * label — which is never scored — and a night recorded live and then offloaded would lose its HRV.
+     * Only ever upgrades: history over realtime/standard, standard over realtime, either over unlabelled.
+     */
+    @Query(
+        "UPDATE rrInterval SET srcChannel = :source " +
+            "WHERE deviceId = :deviceId AND ts = :ts AND rrMs = :rrMs AND seq = :seq " +
+            "AND ((:source = 5 AND (srcChannel IS NULL OR srcChannel IN (6, 7))) " +
+            "OR (:source = 7 AND (srcChannel IS NULL OR srcChannel = 6)))"
+    )
+    suspend fun promoteWhoop5RrSource(deviceId: String, ts: Long, rrMs: Int, seq: Int, source: Int)
+
+    /** Whether a window holds any SCORABLE labelled transport (history or standard profile). */
+    @Query(
+        "SELECT EXISTS(SELECT 1 FROM rrInterval WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
+            "AND srcChannel IN (5, 7))"
+    )
+    suspend fun hasScorableWhoop5Rr(deviceId: String, from: Long, to: Long): Boolean
+
+    /** Promote a batch in ONE transaction — an overnight offload can collide on thousands of beats. */
+    @Transaction
+    suspend fun promoteWhoop5RrSources(rows: List<RrInterval>) {
+        for (r in rows) {
+            val source = r.srcChannel ?: continue
+            promoteWhoop5RrSource(r.deviceId, r.ts, r.rrMs, r.seq, source)
+        }
+    }
+
     @Query(
         "SELECT * FROM event WHERE deviceId = :deviceId AND ts >= :from AND ts <= :to " +
             "ORDER BY ts ASC, kind ASC LIMIT :limit"

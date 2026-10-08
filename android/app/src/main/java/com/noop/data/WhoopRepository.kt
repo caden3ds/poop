@@ -2,6 +2,7 @@ package com.noop.data
 
 import android.content.Context
 import com.noop.protocol.DroppedRtcEvent
+import com.noop.protocol.RrSourceChannel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlin.math.roundToInt
@@ -69,7 +70,8 @@ data class StreamBatch(
 
 // Device-agnostic decoded rows (deviceId attached when inserted). Mirror Streams.swift shapes.
 data class HrRow(val ts: Long, val bpm: Int)
-data class RrRow(val ts: Long, val rrMs: Int)
+/** [srcChannel] names the WHOOP 5 transport that carried the beat; null for WHOOP 4.0. See RrSourceChannel. */
+data class RrRow(val ts: Long, val rrMs: Int, val srcChannel: com.noop.protocol.RrSourceChannel? = null)
 
 /**
  * Attach a tiebreaker `seq` to each R-R interval before insert (Room v18). Multiple beats share one
@@ -92,7 +94,7 @@ internal fun assignRrSeq(deviceId: String, rows: List<RrRow>): List<RrInterval> 
         val key = row.ts to row.rrMs
         val s = seqByBeat.getOrDefault(key, 0)
         seqByBeat[key] = s + 1
-        RrInterval(deviceId = deviceId, ts = row.ts, rrMs = row.rrMs, seq = s)
+        RrInterval(deviceId = deviceId, ts = row.ts, rrMs = row.rrMs, seq = s, srcChannel = row.srcChannel?.code)
     }
 }
 
@@ -229,8 +231,16 @@ class WhoopRepository(private val dao: WhoopDao) {
 
         val hrIds = if (streams.hr.isEmpty()) emptyList() else
             dao.insertHr(streams.hr.map { HrSample(deviceId, it.ts, it.bpm) })
-        val rrIds = if (streams.rr.isEmpty()) emptyList() else
-            dao.insertRr(assignRrSeq(deviceId, streams.rr))
+        val rrRows = assignRrSeq(deviceId, streams.rr)
+        val rrIds = if (rrRows.isEmpty()) emptyList() else dao.insertRr(rrRows)
+        // A labelled beat that collided with an existing row keeps the better label rather than being
+        // dropped. See WhoopDao.promoteWhoop5RrSource for why this decides whether a night scores at all.
+        val promote = rrRows.filterIndexed { i, row ->
+            rrIds.getOrNull(i) == -1L &&
+                (row.srcChannel == RrSourceChannel.WHOOP5_HISTORICAL.code ||
+                    row.srcChannel == RrSourceChannel.WHOOP5_STANDARD.code)
+        }
+        if (promote.isNotEmpty()) dao.promoteWhoop5RrSources(promote)
         val evIds = if (streams.events.isEmpty()) emptyList() else
             dao.insertEvents(streams.events.map { EventRow(deviceId, it.ts, it.kind, it.payloadJSON) })
         val batIds = if (streams.battery.isEmpty()) emptyList() else
@@ -705,6 +715,29 @@ class WhoopRepository(private val dao: WhoopDao) {
 
     suspend fun rrIntervals(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.rrIntervals(deviceId, from, to, limit)
+
+    /**
+     * R-R as SCORING should see it. For a device that has written labelled WHOOP 5 rows, one scorable
+     * transport across the window (see WhoopDao.whoop5RrIntervals); otherwise every row, exactly as before.
+     *
+     * "Is this a 5/MG" is decided by POSITIVE EVIDENCE — a labelled row exists — not by matching a registry
+     * model string. A WHOOP 4.0 can never write one, and an imported source carrying R-R keeps scoring
+     * unchanged. [rrIntervals] stays the raw read for export and diagnostics.
+     */
+    suspend fun rrIntervalsForScoring(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT): List<RrInterval> =
+        if (dao.hasWhoop5RrSource(deviceId)) dao.whoop5RrIntervals(deviceId, from, to, limit)
+        else dao.rrIntervals(deviceId, from, to, limit)
+
+    /**
+     * True when a 5/MG window was scored WITHOUT R-R because everything in it is legacy: unlabelled rows are
+     * present and no scorable labelled transport is. That is an absence, not an answer, and it is the only
+     * case in which a previously computed HRV is kept. A labelled transport — even one too sparse to yield
+     * HRV — ends the protection, because that IS an answer. Ported from upstream ryanbr/noop e79ab584.
+     */
+    suspend fun legacyWhoop5RrWithheld(deviceId: String, from: Long, to: Long): Boolean =
+        dao.hasWhoop5RrSource(deviceId) &&
+            dao.hasLegacyRr(deviceId, from, to) &&
+            !dao.hasScorableWhoop5Rr(deviceId, from, to)
 
     suspend fun events(deviceId: String, from: Long, to: Long, limit: Int = DEFAULT_LIMIT) =
         dao.events(deviceId, from, to, limit)
